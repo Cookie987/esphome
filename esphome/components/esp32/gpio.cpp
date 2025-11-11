@@ -97,7 +97,7 @@ void ESP32InternalGPIOPin::attach_interrupt(void (*func)(void *), void *arg, gpi
   gpio_isr_handler_add(this->get_pin_num(), func, arg);
   // gpio_wakeup_enable only supports GPIO_INTR_LOW_LEVEL and GPIO_INTR_HIGH_LEVEL
   if (idf_type == GPIO_INTR_LOW_LEVEL || idf_type == GPIO_INTR_HIGH_LEVEL) {
-    gpio_wakeup_enable(pin_, idf_type);
+    gpio_wakeup_enable(this->get_pin_num(), idf_type);
   } else {
     ESP_LOGE(TAG, "PM Enabled, but unsupported InterruptType. Interrupts may not work on this pin %d", pin_);
   }
@@ -122,7 +122,7 @@ void ESP32InternalGPIOPin::setup() {
   if (this->flags_ & gpio::FLAG_OUTPUT) {
     gpio_set_drive_capability(this->get_pin_num(), this->get_drive_strength());
   }
-  gpio_hold_en(this->get_pin_num())
+  gpio_hold_en(this->get_pin_num());
   gpio_deep_sleep_hold_en();
 }
 
@@ -153,12 +153,12 @@ void ESP32InternalGPIOPin::digital_write(bool value) {
   gpio_hold_dis(this->get_pin_num());
   gpio_deep_sleep_hold_dis();
   gpio_set_level(this->get_pin_num(), value != this->pin_flags_.inverted ? 1 : 0);
-  gpio_hold_en(this->get_pin_num())
+  gpio_hold_en(this->get_pin_num());
   gpio_deep_sleep_hold_en();
 }
 void ESP32InternalGPIOPin::detach_interrupt() const { 
   gpio_intr_disable(this->get_pin_num()); 
-  gpio_wakeup_disabel(this->get_pin_num());
+  gpio_wakeup_disable(this->get_pin_num());
 
 }
 }  // namespace esp32
@@ -172,10 +172,10 @@ bool IRAM_ATTR ISRInternalGPIOPin::digital_read() {
 
 void IRAM_ATTR ISRInternalGPIOPin::digital_write(bool value) {
   auto *arg = reinterpret_cast<ISRPinArg *>(this->arg_);
-  gpio_hold_dis(this->get_pin_num());
+  gpio_hold_dis(pin_);
   gpio_deep_sleep_hold_dis();
   gpio_hal_set_level(&GPIO_HAL, arg->pin, value != arg->inverted);
-  gpio_hold_en(this->get_pin_num())
+  gpio_hold_en(pin_)
   gpio_deep_sleep_hold_en();
 }
 
@@ -185,7 +185,7 @@ void IRAM_ATTR ISRInternalGPIOPin::clear_interrupt() {
 
 void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
   auto *arg = reinterpret_cast<ISRPinArg *>(arg_);
-  gpio_hold_dis(this->get_pin_num());
+  gpio_hold_dis(pin_);
   gpio_deep_sleep_hold_dis();
   gpio::Flags diff = (gpio::Flags)(flags ^ arg->flags);
   if (diff & gpio::FLAG_OUTPUT) {
@@ -231,7 +231,7 @@ void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
     }
   }
   arg->flags = flags;
-  gpio_hold_en(this->get_pin_num())
+  gpio_hold_en(pin_);
   gpio_deep_sleep_hold_en();
 }
 
