@@ -163,7 +163,7 @@ void ESP32InternalGPIOPin::digital_write(bool value) {
 #endif
 }
 void ESP32InternalGPIOPin::detach_interrupt() const { gpio_intr_disable(this->get_pin_num()); }
-  gpio_intr_disable(this->get_pin_num());
+  gpio_intr_disable(pin_);
 #ifdef USE_POWER_MANAGEMENT
   gpio_wakeup_disabel(pin_);
 #endif
@@ -194,7 +194,7 @@ void IRAM_ATTR ISRInternalGPIOPin::clear_interrupt() {
 void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
   auto *arg = reinterpret_cast<ISRPinArg *>(arg_);
 #ifdef USE_POWER_MANAGEMENT
-  gpio_hold_dis(this->get_pin_num());
+  gpio_hold_dis(pin_);
 #endif
   gpio::Flags diff = (gpio::Flags)(flags ^ arg->flags);
   if (diff & gpio::FLAG_OUTPUT) {

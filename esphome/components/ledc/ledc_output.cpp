@@ -136,6 +136,7 @@ void LEDCOutput::setup() {
   ledc_channel_config_t chan_conf{};
   chan_conf.gpio_num = this->pin_->get_pin();
   chan_conf.speed_mode = speed_mode;
+  chan_conf.sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE;
   chan_conf.channel = chan_num;
   chan_conf.intr_type = LEDC_INTR_DISABLE;
   chan_conf.timer_sel = timer_num;
