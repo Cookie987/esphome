@@ -162,11 +162,12 @@ void ESP32InternalGPIOPin::digital_write(bool value) {
   gpio_hold_en(pin_);
 #endif
 }
-void ESP32InternalGPIOPin::detach_interrupt() const { gpio_intr_disable(this->get_pin_num()); }
-  gpio_intr_disable(pin_);
+void ESP32InternalGPIOPin::detach_interrupt() const { 
+  gpio_intr_disable(this->get_pin_num()); 
 #ifdef USE_POWER_MANAGEMENT
   gpio_wakeup_disabel(pin_);
 #endif
+}
 }  // namespace esp32
 
 using namespace esp32;
