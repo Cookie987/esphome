@@ -110,7 +110,7 @@ std::string ESP32InternalGPIOPin::dump_summary() const {
 }
 
 void ESP32InternalGPIOPin::setup() {
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(this->get_pin_num());
   gpio_deep_sleep_hold_dis();
   gpio_config_t conf{};
   conf.pin_bit_mask = 1ULL << static_cast<uint32_t>(this->pin_);
@@ -122,13 +122,13 @@ void ESP32InternalGPIOPin::setup() {
   if (this->flags_ & gpio::FLAG_OUTPUT) {
     gpio_set_drive_capability(this->get_pin_num(), this->get_drive_strength());
   }
-  gpio_hold_en(pin_)
+  gpio_hold_en(this->get_pin_num())
   gpio_deep_sleep_hold_en();
 }
 
 void ESP32InternalGPIOPin::pin_mode(gpio::Flags flags) {
   // can't call gpio_config here because that logs in esp-idf which may cause issues
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(this->get_pin_num());
   gpio_deep_sleep_hold_dis();
 
   gpio_set_direction(this->get_pin_num(), flags_to_mode(flags));
@@ -141,7 +141,7 @@ void ESP32InternalGPIOPin::pin_mode(gpio::Flags flags) {
     pull_mode = GPIO_PULLDOWN_ONLY;
   }
   gpio_set_pull_mode(this->get_pin_num(), pull_mode);
-  gpio_hold_en(pin_)
+  gpio_hold_en(this->get_pin_num());
   gpio_deep_sleep_hold_en();
 
 }
@@ -150,15 +150,15 @@ bool ESP32InternalGPIOPin::digital_read() {
   return bool(gpio_get_level(this->get_pin_num())) != this->pin_flags_.inverted;
 }
 void ESP32InternalGPIOPin::digital_write(bool value) {
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(this->get_pin_num());
   gpio_deep_sleep_hold_dis();
   gpio_set_level(this->get_pin_num(), value != this->pin_flags_.inverted ? 1 : 0);
-  gpio_hold_en(pin_)
+  gpio_hold_en(this->get_pin_num())
   gpio_deep_sleep_hold_en();
 }
 void ESP32InternalGPIOPin::detach_interrupt() const { 
   gpio_intr_disable(this->get_pin_num()); 
-  gpio_wakeup_disabel(pin_);
+  gpio_wakeup_disabel(this->get_pin_num());
 
 }
 }  // namespace esp32
@@ -172,10 +172,10 @@ bool IRAM_ATTR ISRInternalGPIOPin::digital_read() {
 
 void IRAM_ATTR ISRInternalGPIOPin::digital_write(bool value) {
   auto *arg = reinterpret_cast<ISRPinArg *>(this->arg_);
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(this->get_pin_num());
   gpio_deep_sleep_hold_dis();
   gpio_hal_set_level(&GPIO_HAL, arg->pin, value != arg->inverted);
-  gpio_hold_en(pin_)
+  gpio_hold_en(this->get_pin_num())
   gpio_deep_sleep_hold_en();
 }
 
@@ -185,7 +185,7 @@ void IRAM_ATTR ISRInternalGPIOPin::clear_interrupt() {
 
 void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
   auto *arg = reinterpret_cast<ISRPinArg *>(arg_);
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(this->get_pin_num());
   gpio_deep_sleep_hold_dis();
   gpio::Flags diff = (gpio::Flags)(flags ^ arg->flags);
   if (diff & gpio::FLAG_OUTPUT) {
@@ -231,7 +231,7 @@ void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
     }
   }
   arg->flags = flags;
-  gpio_hold_en(pin_)
+  gpio_hold_en(this->get_pin_num())
   gpio_deep_sleep_hold_en();
 }
 
