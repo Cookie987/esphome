@@ -172,10 +172,10 @@ bool IRAM_ATTR ISRInternalGPIOPin::digital_read() {
 
 void IRAM_ATTR ISRInternalGPIOPin::digital_write(bool value) {
   auto *arg = reinterpret_cast<ISRPinArg *>(this->arg_);
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(arg->pin);
   gpio_deep_sleep_hold_dis();
   gpio_hal_set_level(&GPIO_HAL, arg->pin, value != arg->inverted);
-  gpio_hold_en(pin_)
+  gpio_hold_en(arg->pin);
   gpio_deep_sleep_hold_en();
 }
 
@@ -185,7 +185,7 @@ void IRAM_ATTR ISRInternalGPIOPin::clear_interrupt() {
 
 void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
   auto *arg = reinterpret_cast<ISRPinArg *>(arg_);
-  gpio_hold_dis(pin_);
+  gpio_hold_dis(arg->pin);
   gpio_deep_sleep_hold_dis();
   gpio::Flags diff = (gpio::Flags)(flags ^ arg->flags);
   if (diff & gpio::FLAG_OUTPUT) {
@@ -231,7 +231,7 @@ void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
     }
   }
   arg->flags = flags;
-  gpio_hold_en(pin_);
+  gpio_hold_en(arg->pin);
   gpio_deep_sleep_hold_en();
 }
 
