@@ -113,7 +113,7 @@ std::string ESP32InternalGPIOPin::dump_summary() const {
 
 void ESP32InternalGPIOPin::setup() {
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_dis(pin_);
+  gpio_deep_sleep_hold_dis(); //s
 #endif
   gpio_config_t conf{};
   conf.pin_bit_mask = 1ULL << static_cast<uint32_t>(this->pin_);
@@ -126,14 +126,14 @@ void ESP32InternalGPIOPin::setup() {
     gpio_set_drive_capability(this->get_pin_num(), this->get_drive_strength());
   }
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_en(pin_);
+  gpio_deep_sleep_hold_en(); //s
 #endif
 }
 
 void ESP32InternalGPIOPin::pin_mode(gpio::Flags flags) {
   // can't call gpio_config here because that logs in esp-idf which may cause issues
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_dis(pin_);
+  gpio_deep_sleep_hold_dis(); //s
 #endif
   gpio_set_direction(this->get_pin_num(), flags_to_mode(flags));
   gpio_pull_mode_t pull_mode = GPIO_FLOATING;
@@ -146,7 +146,7 @@ void ESP32InternalGPIOPin::pin_mode(gpio::Flags flags) {
   }
   gpio_set_pull_mode(this->get_pin_num(), pull_mode);
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_en(pin_);
+  gpio_deep_sleep_hold_en(); //s
 #endif
 }
 
@@ -155,17 +155,17 @@ bool ESP32InternalGPIOPin::digital_read() {
 }
 void ESP32InternalGPIOPin::digital_write(bool value) {
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_dis(pin_);
+  gpio_deep_sleep_hold_dis(); //s
 #endif
   gpio_set_level(this->get_pin_num(), value != this->pin_flags_.inverted ? 1 : 0);
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_en(pin_);
+  gpio_deep_sleep_hold_en(); //s
 #endif
 }
 void ESP32InternalGPIOPin::detach_interrupt() const { 
   gpio_intr_disable(this->get_pin_num()); 
 #ifdef USE_POWER_MANAGEMENT
-  gpio_wakeup_disabel(pin_);
+  gpio_wakeup_disabel(); //s
 #endif
 }
 }  // namespace esp32
@@ -180,11 +180,11 @@ bool IRAM_ATTR ISRInternalGPIOPin::digital_read() {
 void IRAM_ATTR ISRInternalGPIOPin::digital_write(bool value) {
   auto *arg = reinterpret_cast<ISRPinArg *>(this->arg_);
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_dis(pin_);
+  gpio_deep_sleep_hold_dis(); //s
 #endif
   gpio_hal_set_level(&GPIO_HAL, arg->pin, value != arg->inverted);
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_en(pin_);
+  gpio_deep_sleep_hold_en(); //s
 #endif
 }
 
@@ -195,7 +195,7 @@ void IRAM_ATTR ISRInternalGPIOPin::clear_interrupt() {
 void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
   auto *arg = reinterpret_cast<ISRPinArg *>(arg_);
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_dis(pin_);
+  gpio_deep_sleep_hold_dis(); //s
 #endif
   gpio::Flags diff = (gpio::Flags)(flags ^ arg->flags);
   if (diff & gpio::FLAG_OUTPUT) {
@@ -242,7 +242,7 @@ void IRAM_ATTR ISRInternalGPIOPin::pin_mode(gpio::Flags flags) {
   }
   arg->flags = flags;
 #ifdef USE_POWER_MANAGEMENT
-  gpio_deep_sleep_hold_en(pin_);
+  gpio_deep_sleep_hold_en(); //s
 #endif
 }
 
