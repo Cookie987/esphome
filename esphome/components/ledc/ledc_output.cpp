@@ -66,7 +66,7 @@ esp_err_t configure_timer_frequency(ledc_mode_t speed_mode, ledc_timer_t timer_n
   timer_conf.duty_resolution = static_cast<ledc_timer_bit_t>(bit_depth);
   timer_conf.timer_num = timer_num;
   timer_conf.freq_hz = (uint32_t) frequency;
-  timer_conf.clk_cfg = RC_FAST_CLK;
+  timer_conf.clk_cfg = LEDC_USE_RC_FAST_CLK;
 
   // Configure the time with fallback in case of error
   int attempt_count_max = SETUP_ATTEMPT_COUNT_MAX;
