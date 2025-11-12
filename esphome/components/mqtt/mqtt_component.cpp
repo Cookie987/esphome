@@ -31,10 +31,10 @@ std::string MQTTComponent::get_default_topic_for_(const std::string &suffix) con
   const auto mac = get_mac_address();
   if (topic_prefix.empty()) {
     // If the topic_prefix is null, the default topic should be null
-    return "lemonade/" + mac;
+    return "";
   }
 
-  return topic_prefix + "/" + this->component_type() + "/" + this->get_default_object_id_() + "/" + suffix;
+  return "lemonade/" + mac + "/" + this->component_type() + "/" + this->get_default_object_id_() + "/" + suffix;
 }
 
 std::string MQTTComponent::get_state_topic_() const {
