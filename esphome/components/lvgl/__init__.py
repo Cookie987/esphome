@@ -117,6 +117,9 @@ LV_CONF_H_FORMAT = """\
 
 def generate_lv_conf_h():
     definitions = [as_macro(m, v) for m, v in df.lv_defines.items()]
+    definitions.append("#define LV_USE_TJPGD 1")
+    definitions.append("#define LV_USE_FS_STDIO 1")
+    definitions.append("#define LV_FS_STDIO_DRIVER_LETTER 'A'")
     definitions.sort()
     return LV_CONF_H_FORMAT.format("\n".join(definitions))
 
