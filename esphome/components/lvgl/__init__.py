@@ -121,7 +121,7 @@ def generate_lv_conf_h():
     definitions.append("#define LV_USE_FS_POSIX 1")
     # definitions.append("#define LV_USE_FS_STDIO 1")
     # definitions.append("#define LV_USE_FS_LITTLEFS 1")
-    definitions.append("LV_FS_POSIX_CACHE_SIZE 32768")
+    definitions.append("#define LV_FS_POSIX_CACHE_SIZE 32768")
     definitions.append("#define LV_USE_PNG 1")
     definitions.append("#define LV_FS_POSIX_LETTER 'A'")
     # definitions.append("#define LV_FS_STDIO_LETTER 'S'")
