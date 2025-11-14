@@ -117,12 +117,13 @@ LV_CONF_H_FORMAT = """\
 
 def generate_lv_conf_h():
     definitions = [as_macro(m, v) for m, v in df.lv_defines.items()]
-    definitions.append("#define LV_USE_TJPGD 1")
+    definitions.append("#define LV_USE_SJPG 1")
     definitions.append("#define LV_USE_FS_POSIX 1")
+    definitions.append("#define LV_USE_FS_STDIO 1")
     # definitions.append("#define LV_USE_FS_LITTLEFS 1")
-    definitions.append("#define LV_USE_LODEPNG 1")
-    definitions.append("#define LV_FS_POSIX_DRIVER_LETTER 'A'")
-    # definitions.append("#define LV_FS_LITTLEFS_DRIVER_LETTER 'L'")
+    definitions.append("#define LV_USE_PNG 1")
+    definitions.append("#define LV_FS_POSIX_LETTER 'A'")
+    definitions.append("#define LV_FS_STDIO_LETTER 'S'")
     definitions.sort()
     return LV_CONF_H_FORMAT.format("\n".join(definitions))
 
