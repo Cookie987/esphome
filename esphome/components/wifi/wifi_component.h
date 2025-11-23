@@ -444,6 +444,8 @@ class WiFiComponent : public Component {
     return true;
   }
 
+  void connect_soon_();
+
   void wifi_loop_();
   bool wifi_mode_(optional<bool> sta, optional<bool> ap);
   bool wifi_sta_pre_setup_();
@@ -547,9 +549,11 @@ class WiFiComponent : public Component {
   bool btm_{false};
   bool rrm_{false};
 #endif
-  bool enable_on_boot_;
+  bool enable_on_boot_{true};
   bool got_ipv4_address_{false};
   bool keep_scan_results_{false};
+  bool did_scan_this_cycle_{false};
+  bool skip_cooldown_next_cycle_{false};
 
   // Pointers at the end (naturally aligned)
   Trigger<> *connect_trigger_{new Trigger<>()};
