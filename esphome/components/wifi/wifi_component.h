@@ -309,6 +309,7 @@ class WiFiComponent : public Component {
   /// Integrates seamlessly with YAML-configured WiFi networks
   /// @return true if successful, false if list full or invalid parameters
   bool append_wifi_sta(const std::string &ssid, const std::string &password);
+  void clear_saved_wifi_stas();
 
   // ========== INTERNAL METHODS ==========
   // (In most use cases you won't need these)
