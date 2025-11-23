@@ -755,7 +755,8 @@ bool WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &
 void WiFiComponent::clear_saved_wifi_stas() {
   SavedWifiList wifi_list;
   wifi_list.count = 0;
-  this->wifi_list_pref_.put("wifi_list", &wifi_list, sizeof(wifi_list));
+  this->wifi_list_pref_.save(&wifi_list);
+  global_preferences->sync();
 }
 
 void WiFiComponent::start_connecting(const WiFiAP &ap) {
