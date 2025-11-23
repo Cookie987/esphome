@@ -363,12 +363,10 @@ void WiFiComponent::start() {
   if (this->wifi_list_pref_.load(&wifi_list) && wifi_list.count > 0) {
     ESP_LOGD(TAG, "Loaded %d saved WiFi networks from flash", wifi_list.count);
     for (uint8_t i = 0; i < wifi_list.count; i++) {
-      if (this->sta_.size() < FixedVector<WiFiAP>::max_size()) {
-        WiFiAP ap;
-        ap.set_ssid(wifi_list.entries[i].ssid);
-        ap.set_password(wifi_list.entries[i].password);
-        this->add_sta(ap);
-      }
+      WiFiAP ap;
+      ap.set_ssid(wifi_list.entries[i].ssid);
+      ap.set_password(wifi_list.entries[i].password);
+      this->add_sta(ap);
     }
   }
 
