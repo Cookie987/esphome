@@ -346,6 +346,7 @@ void WiFiComponent::start() {
 #ifdef USE_WIFI_FAST_CONNECT
   this->fast_connect_pref_ = global_preferences->make_preference<wifi::SavedWifiFastConnectSettings>(hash + 1, false);
 #endif
+  this->wifi_list_pref_ = global_preferences->make_preference<wifi::SavedWifiList>(hash + 2, true);
 
   SavedWifiSettings save{};
   if (this->pref_.load(&save)) {
@@ -355,6 +356,20 @@ void WiFiComponent::start() {
     sta.set_ssid(save.ssid);
     sta.set_password(save.password);
     this->set_sta(sta);
+  }
+
+  // Load saved multi-WiFi list from flash
+  SavedWifiList wifi_list{};
+  if (this->wifi_list_pref_.load(&wifi_list) && wifi_list.count > 0) {
+    ESP_LOGD(TAG, "Loaded %d saved WiFi networks from flash", wifi_list.count);
+    for (uint8_t i = 0; i < wifi_list.count; i++) {
+      if (this->sta_.size() < FixedVector<WiFiAP>::max_size()) {
+        WiFiAP ap;
+        ap.set_ssid(wifi_list.entries[i].ssid);
+        ap.set_password(wifi_list.entries[i].password);
+        this->add_sta(ap);
+      }
+    }
   }
 
   if (this->has_sta()) {
@@ -666,6 +681,77 @@ void WiFiComponent::save_wifi_sta(const std::string &ssid, const std::string &pa
   sta.set_ssid(ssid);
   sta.set_password(password);
   this->set_sta(sta);
+}
+
+bool WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &password) {
+  // Validate input
+  if (ssid.empty() || ssid.length() > 32) {
+    ESP_LOGW(TAG, "Invalid SSID length: %zu (must be 1-32 chars)", ssid.length());
+    return false;
+  }
+  if (password.length() > 64) {
+    ESP_LOGW(TAG, "Invalid password length: %zu (max 64 chars)", password.length());
+    return false;
+  }
+
+  // Load existing saved list
+  SavedWifiList wifi_list{};
+  this->wifi_list_pref_.load(&wifi_list);
+
+  // Check if list is full
+  if (wifi_list.count >= MAX_SAVED_WIFI_ENTRIES) {
+    ESP_LOGW(TAG, "Saved WiFi list full (max %d)", MAX_SAVED_WIFI_ENTRIES);
+    return false;
+  }
+
+  // Check if SSID already exists (in saved list)
+  bool found = false;
+  for (uint8_t i = 0; i < wifi_list.count; i++) {
+    if (strcmp(wifi_list.entries[i].ssid, ssid.c_str()) == 0) {
+      // Update existing entry
+      ESP_LOGD(TAG, "WiFi " LOG_SECRET("'%s'") " already exists, updating", ssid.c_str());
+      strncpy(wifi_list.entries[i].password, password.c_str(), sizeof(wifi_list.entries[i].password) - 1);
+      wifi_list.entries[i].password[sizeof(wifi_list.entries[i].password) - 1] = '\0';
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    // Add new entry to saved list
+    uint8_t index = wifi_list.count;
+    strncpy(wifi_list.entries[index].ssid, ssid.c_str(), sizeof(wifi_list.entries[index].ssid) - 1);
+    wifi_list.entries[index].ssid[sizeof(wifi_list.entries[index].ssid) - 1] = '\0';
+    strncpy(wifi_list.entries[index].password, password.c_str(), sizeof(wifi_list.entries[index].password) - 1);
+    wifi_list.entries[index].password[sizeof(wifi_list.entries[index].password) - 1] = '\0';
+    wifi_list.count++;
+  }
+
+  // Save to flash
+  if (!this->wifi_list_pref_.save(&wifi_list)) {
+    ESP_LOGE(TAG, "Failed to save WiFi to flash");
+    return false;
+  }
+  global_preferences->sync();
+
+  // Add to sta_ for immediate use (if not already there)
+  bool exists_in_sta = false;
+  for (const auto &ap : this->sta_) {
+    if (ap.get_ssid() == ssid) {
+      exists_in_sta = true;
+      break;
+    }
+  }
+
+  if (!exists_in_sta) {
+    WiFiAP ap;
+    ap.set_ssid(ssid);
+    ap.set_password(password);
+    this->add_sta(ap);
+  }
+
+  ESP_LOGI(TAG, "WiFi " LOG_SECRET("'%s'") " appended (total: %d saved)", ssid.c_str(), wifi_list.count);
+  return true;
 }
 
 void WiFiComponent::start_connecting(const WiFiAP &ap) {
