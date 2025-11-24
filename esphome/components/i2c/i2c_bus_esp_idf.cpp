@@ -48,6 +48,7 @@ void IDFI2CBus::setup() {
 #else
   bus_conf.clk_source = I2C_CLK_SRC_DEFAULT;
 #endif
+  bus.conf.clk_source = I2C_CLK_SRC_XTAL;
   bus_conf.flags.enable_internal_pullup = sda_pullup_enabled_ || scl_pullup_enabled_;
   esp_err_t err = i2c_new_master_bus(&bus_conf, &this->bus_);
   if (err != ESP_OK) {
