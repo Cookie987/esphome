@@ -114,7 +114,6 @@ def generate_lv_conf_h():
     definitions.append("#define LV_USE_CALENDAR_HEADER_ARROW 1")
     definitions.append("#define LV_USE_SJPG 1")
     definitions.append("#define LV_USE_FS_POSIX 1")
-    definitions.append("#define LV_FS_POSIX_CACHE_SIZE 32768")
     definitions.append("#define LV_DISP_DEF_REFR_PERIOD 15")
     definitions.append("#define LV_USE_PNG 1")
     definitions.append("#define LV_IMG_CACHE_DEF_SIZE 10")
