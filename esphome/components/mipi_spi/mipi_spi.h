@@ -190,6 +190,8 @@ class MipiSpi : public display::Display,
     if (get_pixel_mode(bitness) != BUFFERPIXEL || big_endian != IS_BIG_ENDIAN) {
       // note that the usual logging macros are banned in header files, so use their replacement
       esph_log_e(TAG, "Unsupported color depth or bit order");
+      esph_log_e(TAG, "Expected: %d bits, %s endian", BUFFERPIXEL * 8, IS_BIG_ENDIAN ? "big" : "little");
+      esph_log_e(TAG, "Got: %d bits, %s endian", bitness * 8, big_endian ? "big" : "little");
       return;
     }
     this->write_to_display_(x_start, y_start, w, h, reinterpret_cast<const BUFFERTYPE *>(ptr), x_offset, y_offset,
