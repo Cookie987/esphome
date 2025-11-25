@@ -159,9 +159,9 @@ def model_schema(config):
     cv_dimensions = (
         cv.Optional if model.get_default(CONF_WIDTH) and not is_swapped else cv.Required
     )
-    pixel_modes = DISPLAY_PIXEL_MODES
+    pixel_modes = DISPLAY_PIXEL_MODES if bus_mode == TYPE_SINGLE else (DISPLAY_16BIT,)
     color_depth = (
-        ("18", "16", "8", "18bit", "16bit", "8bit") if bus_mode == TYPE_SINGLE else ("16", "16bit")
+        ("16", "8", "16bit", "8bit") if bus_mode == TYPE_SINGLE else ("16", "16bit")
     )
     other_options = [
         CONF_INVERT_COLORS,
