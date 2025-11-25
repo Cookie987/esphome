@@ -1,6 +1,7 @@
 from esphome.components.mipi import (
     ADJCTL3,
     CSCON,
+    COLMOD,
     DFUNCTR,
     ETMOD,
     FRMCTR1,
