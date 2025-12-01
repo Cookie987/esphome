@@ -10,30 +10,14 @@ from ..defines import (
 from ..helpers import lvgl_components_required
 from ..lv_validation import lv_text
 from ..lvcode import lv, lv_add, lv_expr
-from ..types import LvCompound, LvType, WidgetType
+from ..types import LvCompound, lv_list_t, WidgetType
 from . import Widget
 
 CONF_BUTTONS = "buttons"
 CONF_TEXTS = "texts"
 
 
-class LvListText(LvType):
-    """List type that passes the clicked button's text as a parameter"""
-    def __init__(self):
-        super().__init__(
-            "LvListType",
-            parents=(LvCompound,),
-            largs=[(cg.std_string, "text")],
-        )
-        self.value_property = None
-    
-    def value(self, w):
-        # Get the text of the clicked button
-        # The event target is passed as 'obj' parameter in the trigger
-        return lv_expr.list_get_btn_text(w.obj, lv_expr.event_get_target())
-
-
-lv_list_t = LvListText()
+lv_list_t.value = lambda w: lv_expr.list_get_btn_text(w.obj, lv_expr.event_get_target())
 
 
 LIST_BUTTON_SCHEMA = cv.Schema(
