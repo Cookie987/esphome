@@ -408,5 +408,15 @@ class LvKeyboardType : public key_provider::KeyProvider, public LvCompound {
   void set_obj(lv_obj_t *lv_obj) override;
 };
 #endif  // USE_LVGL_KEYBOARD
+
+#ifdef USE_LVGL_LIST
+class LvListType : public LvCompound {
+ public:
+  void set_obj(lv_obj_t *lv_obj) override {
+    LvCompound::set_obj(lv_obj);
+  }
+};
+#endif  // USE_LVGL_LIST
+
 }  // namespace lvgl
 }  // namespace esphome

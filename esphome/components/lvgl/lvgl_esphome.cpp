@@ -566,6 +566,13 @@ void lv_animimg_stop(lv_obj_t *obj) {
   lv_animimg_set_duration(obj, duration);
 }
 #endif
+
+#ifdef USE_LVGL_LIST
+void LvListType::set_obj(lv_obj_t *lv_obj) {
+  LvCompound::set_obj(lv_obj);
+}
+#endif  // USE_LVGL_LIST
+
 void LvglComponent::static_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
   reinterpret_cast<LvglComponent *>(disp_drv->user_data)->flush_cb_(disp_drv, area, color_p);
 }
