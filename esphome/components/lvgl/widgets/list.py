@@ -21,7 +21,7 @@ class LvListText(LvType):
     """List type that passes the clicked button's text as a parameter"""
     def __init__(self):
         super().__init__(
-            "lv_obj_t",
+            "lv_list_t",
             parents=(LvCompound,),
             largs=[(cg.std_string, "text")],
         )
