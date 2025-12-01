@@ -71,9 +71,6 @@ lv_page_t = LvType("LvPageType", parents=(LvCompound,))
 lv_img_t = LvType("lv_img_t")
 lv_gradient_t = LvType("lv_grad_dsc_t")
 
-# List widget type (compound) used for lvgl.list
-lv_list_t = LvType("LvListType", parents=(LvCompound,), largs=[(cg.std_string, "text")])
-
 LV_EVENT = MockObj(base="LV_EVENT_", op="")
 LV_STATE = MockObj(base="LV_STATE_", op="")
 LV_BTNMATRIX_CTRL = MockObj(base="LV_BTNMATRIX_CTRL_", op="")
