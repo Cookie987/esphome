@@ -1,5 +1,4 @@
 import sys
-import builtins
 from typing import Any
 
 from esphome import codegen as cg, config_validation as cv
@@ -163,7 +162,7 @@ class Widget:
     def get_value(self):
         if isinstance(self.type.w_type, LvType):
             result = self.type.w_type.value(self)
-            if isinstance(result, builtins.list):
+            if isinstance(result, list):
                 return result[0]
             return result
         return self.obj
@@ -171,7 +170,7 @@ class Widget:
     def get_values(self):
         if isinstance(self.type.w_type, LvType):
             result = self.type.w_type.value(self)
-            if isinstance(result, builtins.list):
+            if isinstance(result, list):
                 return result
             return [result]
         return [self.obj]
