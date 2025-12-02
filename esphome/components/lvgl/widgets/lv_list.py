@@ -17,6 +17,7 @@ from ..lvcode import LocalVariable, lv, lv_expr
 from ..schemas import part_schema
 from ..types import WidgetType, lv_obj_t
 from . import Widget, set_obj_properties
+from esphome import codegen as cg
 
 # Create mock widget types for styling purposes (not registered as real widgets)
 list_button_spec = WidgetType(
@@ -66,8 +67,8 @@ class ListType(WidgetType):
                     
                     # Check if this is a button or text item
                     if CONF_LIST_BUTTON in item_config:
-                        # Add button item
-                        lv.list_add_btn(w.obj, text_value)
+                        # Add button item with NULL icon
+                        lv.list_add_btn(w.obj, cg.nullptr, text_value)
                         # Apply button-specific styles if provided
                         button_style = item_config[CONF_LIST_BUTTON]
                         if button_style:
@@ -89,7 +90,7 @@ class ListType(WidgetType):
                                 await set_obj_properties(text_widget, text_style)
                     else:
                         # Default to button if no specific type specified
-                        lv.list_add_btn(w.obj, text_value)
+                        lv.list_add_btn(w.obj, cg.nullptr, text_value)
 
     def get_uses(self):
         return ()
