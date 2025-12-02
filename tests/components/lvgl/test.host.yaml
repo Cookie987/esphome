@@ -40,6 +40,18 @@ lvgl:
                 text: Click ME
           on_click:
             logger.log: Clicked
+      - list:
+          x: 10
+          y: 100
+          width: 200
+          height: 150
+          items:
+            - text: Item 1
+              list_button: {}
+            - text: Item 2
+              list_button: {}
+            - text: Section Title
+              list_text: {}
 
 font:
   - file: "gfonts://Roboto"
