@@ -18,15 +18,13 @@ from ..schemas import part_schema
 from ..types import WidgetType, lv_obj_t
 from . import Widget, set_obj_properties
 
-lv_list_button_t = lv_obj_t
-lv_list_text_t = lv_obj_t
-
+# Create mock widget types for styling purposes (not registered as real widgets)
 list_button_spec = WidgetType(
-    CONF_LIST_BUTTON, lv_list_button_t, (CONF_MAIN, CONF_SELECTED)
+    CONF_LIST_BUTTON, lv_obj_t, (CONF_MAIN, CONF_SELECTED), is_mock=True
 )
 
 list_text_spec = WidgetType(
-    CONF_LIST_TEXT, lv_list_text_t, (CONF_MAIN,)
+    CONF_LIST_TEXT, lv_obj_t, (CONF_MAIN,), is_mock=True
 )
 
 LIST_ITEM_SCHEMA = cv.Schema(
