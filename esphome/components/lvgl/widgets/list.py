@@ -13,16 +13,13 @@ from ..defines import (
 )
 from ..helpers import lvgl_components_required
 from ..lv_validation import lv_text
-from ..lvcode import LocalVariable, lv, lv_add, lv_expr
+from ..lvcode import LocalVariable, lv, lv_expr
 from ..schemas import part_schema
-from ..types import LvType, WidgetType, lv_obj_t
+from ..types import WidgetType, lv_obj_t
 from . import Widget, set_obj_properties
 
-CONF_BUTTONS = "buttons"
-
-lv_list_t = LvType("lv_list_t")
-lv_list_button_t = LvType("lv_list_btn_t")
-lv_list_text_t = LvType("lv_list_text_t")
+lv_list_button_t = lv_obj_t
+lv_list_text_t = lv_obj_t
 
 list_button_spec = WidgetType(
     CONF_LIST_BUTTON, lv_list_button_t, (CONF_MAIN, CONF_SELECTED)
@@ -54,10 +51,11 @@ class ListType(WidgetType):
     def __init__(self):
         super().__init__(
             CONF_LIST,
-            lv_list_t,
+            lv_obj_t,
             (CONF_MAIN, CONF_SCROLLBAR, CONF_SELECTED),
             LIST_SCHEMA,
             modify_schema=LIST_UPDATE_SCHEMA,
+            lv_name="list",
         )
 
     async def to_code(self, w: Widget, config):
