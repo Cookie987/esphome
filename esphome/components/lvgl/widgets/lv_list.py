@@ -14,18 +14,21 @@ from ..defines import (
 from ..helpers import lvgl_components_required
 from ..lv_validation import lv_text
 from ..lvcode import LocalVariable, lv, lv_expr, lv_assign, lv_Pvariable, lv_add
-from ..schemas import part_schema
-from ..types import WidgetType, lv_obj_t
+from ..schemas import part_schema, automation_schema
+from ..types import WidgetType, lv_obj_t, LvType
 from . import Widget, set_obj_properties
 from esphome import codegen as cg
 
 # Create mock widget types for styling purposes (not registered as real widgets)
+lv_list_button_t = LvType("lv_list_btn_t")
+lv_list_text_t = LvType("lv_list_text_t")
+
 list_button_spec = WidgetType(
-    CONF_LIST_BUTTON, lv_obj_t, (CONF_MAIN, CONF_SELECTED), is_mock=True
+    CONF_LIST_BUTTON, lv_list_button_t, (CONF_MAIN, CONF_SELECTED), is_mock=True
 )
 
 list_text_spec = WidgetType(
-    CONF_LIST_TEXT, lv_obj_t, (CONF_MAIN,), is_mock=True
+    CONF_LIST_TEXT, lv_list_text_t, (CONF_MAIN,), is_mock=True
 )
 
 LIST_ITEM_SCHEMA = cv.Schema(
@@ -35,7 +38,7 @@ LIST_ITEM_SCHEMA = cv.Schema(
         cv.Optional(CONF_LIST_BUTTON): part_schema(list_button_spec.parts),
         cv.Optional(CONF_LIST_TEXT): part_schema(list_text_spec.parts),
     }
-)
+).extend(automation_schema(lv_list_button_t))
 
 LIST_SCHEMA = cv.Schema(
     {
