@@ -118,6 +118,7 @@ def generate_lv_conf_h():
     definitions.append("#define LV_USE_PNG 1")
     definitions.append("#define LV_IMG_CACHE_DEF_SIZE 10")
     definitions.append("#define LV_FS_POSIX_LETTER 'A'")
+    definitions.append("#define LV_USE_IME_PINYIN 1")
     definitions.sort()
     return LV_CONF_H_FORMAT.format("\n".join(definitions))
 
