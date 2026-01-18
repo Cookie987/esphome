@@ -81,7 +81,8 @@ std::string MQTTComponent::get_default_topic_for_(const std::string &suffix) con
   const auto mac = get_mac_address();
   char buf[DEFAULT_TOPIC_MAX_LEN];
   char *p = buf;
-  p = append_str(p, "lemonade/" + mac + '/')
+  p = append_str(p, "lemonade/")
+  p = append_char(mac + "/")
   p = append_str(p, topic_prefix.data(), topic_prefix.size());
   p = append_char(p, '/');
   p = append_str(p, comp_type, strlen(comp_type));
