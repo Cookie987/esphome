@@ -70,13 +70,27 @@ std::string MQTTComponent::get_discovery_topic_(const MQTTDiscoveryInfo &discove
 
 std::string MQTTComponent::get_default_topic_for_(const std::string &suffix) const {
   const std::string &topic_prefix = global_mqtt_client->get_topic_prefix();
-  const auto mac = get_mac_address();
   if (topic_prefix.empty()) {
     // If the topic_prefix is null, the default topic should be null
     return "";
   }
 
-  return "lemonade/" + mac + "/" + this->component_type() + "/" + this->get_default_object_id_() + "/" + suffix;
+  const char *comp_type = this->component_type();
+  char object_id_buf[OBJECT_ID_MAX_LEN];
+  StringRef object_id = this->get_default_object_id_to_(object_id_buf);
+  const auto mac = get_mac_address();
+  char buf[DEFAULT_TOPIC_MAX_LEN];
+  char *p = buf;
+  p = append_str(p, "lemonade/" + mac + '/')
+  p = append_str(p, topic_prefix.data(), topic_prefix.size());
+  p = append_char(p, '/');
+  p = append_str(p, comp_type, strlen(comp_type));
+  p = append_char(p, '/');
+  p = append_str(p, object_id.c_str(), object_id.size());
+  p = append_char(p, '/');
+  p = append_str(p, suffix.data(), suffix.size());
+
+  return std::string(buf, p - buf);
 }
 
 std::string MQTTComponent::get_state_topic_() const {
