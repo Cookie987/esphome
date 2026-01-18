@@ -1,4 +1,5 @@
 #include <cinttypes>
+
 #include "light_call.h"
 #include "light_state.h"
 #include "esphome/core/log.h"
@@ -153,15 +154,15 @@ void LightCall::perform() {
 
   } else if (this->has_effect_()) {
     // EFFECT
-    const char *effect_s;
+    StringRef effect_s;
     if (this->effect_ == 0u) {
-      effect_s = "None";
+      effect_s = StringRef::from_lit("None");
     } else {
       effect_s = this->parent_->effects_[this->effect_ - 1]->get_name();
     }
 
     if (publish) {
-      ESP_LOGD(TAG, "  Effect: '%s'", effect_s);
+      ESP_LOGD(TAG, "  Effect: '%.*s'", (int) effect_s.size(), effect_s.c_str());
     }
 
     this->parent_->start_effect_(this->effect_);
@@ -174,8 +175,10 @@ void LightCall::perform() {
     this->parent_->set_immediately_(v, publish);
   }
 
-  if (!this->has_transition_()) {
-    this->parent_->target_state_reached_callback_.call();
+  if (!this->has_transition_() && this->parent_->target_state_reached_listeners_) {
+    for (auto *listener : *this->parent_->target_state_reached_listeners_) {
+      listener->on_light_target_state_reached();
+    }
   }
   if (publish) {
     this->parent_->publish_state();
@@ -502,24 +505,23 @@ color_mode_bitmask_t LightCall::get_suitable_color_modes_mask_() {
 #undef KEY
 }
 
-LightCall &LightCall::set_effect(const std::string &effect) {
-  if (strcasecmp(effect.c_str(), "none") == 0) {
+LightCall &LightCall::set_effect(const char *effect, size_t len) {
+  if (len == 4 && strncasecmp(effect, "none", 4) == 0) {
     this->set_effect(0);
     return *this;
   }
 
   bool found = false;
+  StringRef effect_ref(effect, len);
   for (uint32_t i = 0; i < this->parent_->effects_.size(); i++) {
-    LightEffect *e = this->parent_->effects_[i];
-
-    if (strcasecmp(effect.c_str(), e->get_name()) == 0) {
+    if (str_equals_case_insensitive(effect_ref, this->parent_->effects_[i]->get_name())) {
       this->set_effect(i + 1);
       found = true;
       break;
     }
   }
   if (!found) {
-    ESP_LOGW(TAG, "'%s': no such effect '%s'", this->parent_->get_name().c_str(), effect.c_str());
+    ESP_LOGW(TAG, "'%s': no such effect '%.*s'", this->parent_->get_name().c_str(), (int) len, effect);
   }
   return *this;
 }

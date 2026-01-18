@@ -127,7 +127,11 @@ void LightState::loop() {
       this->transformer_->stop();
       this->is_transformer_active_ = false;
       this->transformer_ = nullptr;
-      this->target_state_reached_callback_.call();
+      if (this->target_state_reached_listeners_) {
+        for (auto *listener : *this->target_state_reached_listeners_) {
+          listener->on_light_target_state_reached();
+        }
+      }
 
       // Disable loop if idle (no transformer and no effect)
       this->disable_loop_if_idle_();
@@ -146,7 +150,11 @@ void LightState::loop() {
 float LightState::get_setup_priority() const { return setup_priority::HARDWARE - 1.0f; }
 
 void LightState::publish_state() {
-  this->remote_values_callback_.call();
+  if (this->remote_values_listeners_) {
+    for (auto *listener : *this->remote_values_listeners_) {
+      listener->on_light_remote_values_update();
+    }
+  }
 #if defined(USE_LIGHT) && defined(USE_CONTROLLER_REGISTRY)
   ControllerRegistry::notify_light_update(this);
 #endif
@@ -154,28 +162,26 @@ void LightState::publish_state() {
 
 LightOutput *LightState::get_output() const { return this->output_; }
 
-static constexpr const char *EFFECT_NONE = "None";
 static constexpr auto EFFECT_NONE_REF = StringRef::from_lit("None");
 
-std::string LightState::get_effect_name() {
+StringRef LightState::get_effect_name() {
   if (this->active_effect_index_ > 0) {
     return this->effects_[this->active_effect_index_ - 1]->get_name();
-  }
-  return EFFECT_NONE;
-}
-
-StringRef LightState::get_effect_name_ref() {
-  if (this->active_effect_index_ > 0) {
-    return StringRef(this->effects_[this->active_effect_index_ - 1]->get_name());
   }
   return EFFECT_NONE_REF;
 }
 
-void LightState::add_new_remote_values_callback(std::function<void()> &&send_callback) {
-  this->remote_values_callback_.add(std::move(send_callback));
+void LightState::add_remote_values_listener(LightRemoteValuesListener *listener) {
+  if (!this->remote_values_listeners_) {
+    this->remote_values_listeners_ = make_unique<std::vector<LightRemoteValuesListener *>>();
+  }
+  this->remote_values_listeners_->push_back(listener);
 }
-void LightState::add_new_target_state_reached_callback(std::function<void()> &&send_callback) {
-  this->target_state_reached_callback_.add(std::move(send_callback));
+void LightState::add_target_state_reached_listener(LightTargetStateReachedListener *listener) {
+  if (!this->target_state_reached_listeners_) {
+    this->target_state_reached_listeners_ = make_unique<std::vector<LightTargetStateReachedListener *>>();
+  }
+  this->target_state_reached_listeners_->push_back(listener);
 }
 
 void LightState::set_default_transition_length(uint32_t default_transition_length) {
@@ -291,8 +297,7 @@ void LightState::set_immediately_(const LightColorValues &target, bool set_remot
     this->remote_values = target;
   }
   this->output_->update_state(this);
-  this->next_write_ = true;
-  this->enable_loop();
+  this->schedule_write_();
 }
 
 void LightState::disable_loop_if_idle_() {
