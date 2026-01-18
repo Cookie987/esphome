@@ -967,6 +967,87 @@ bool WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &
   return true;
 }
 
+bool WiFiComponent::delete_wifi_sta(const std::string &ssid) {
+  // Validate input
+  if (ssid.empty() || ssid.length() > 32) {
+    ESP_LOGW(TAG, "Invalid SSID length for deletion: %zu (must be 1-32 chars)", ssid.length());
+    return false;
+  }
+
+  // Load existing saved list
+  SavedWifiList wifi_list{};
+  this->wifi_list_pref_.load(&wifi_list);
+
+  // Find the index of the SSID to delete in saved list
+  int found_index = -1;
+  for (uint8_t i = 0; i < wifi_list.count; i++) {
+    if (strcmp(wifi_list.entries[i].ssid, ssid.c_str()) == 0) {
+      found_index = i;
+      break;
+    }
+  }
+
+  if (found_index != -1) {
+    ESP_LOGD(TAG, "Deleting WiFi " LOG_SECRET("'%s'") " from saved list", ssid.c_str());
+    // Shift entries to remove the found one
+    for (uint8_t i = found_index; i < wifi_list.count - 1; i++) {
+      wifi_list.entries[i] = wifi_list.entries[i + 1];
+    }
+    wifi_list.count--;
+    // Clear the last entry (which is now a duplicate)
+    memset(&wifi_list.entries[wifi_list.count], 0, sizeof(SavedWifiEntry));
+
+    // Save to flash
+    if (!this->wifi_list_pref_.save(&wifi_list)) {
+      ESP_LOGE(TAG, "Failed to save updated WiFi list to flash");
+      // Continue to try to remove from memory
+    }
+    global_preferences->sync();
+  }
+
+  // Remove from in-memory sta_ vector
+  bool removed_from_sta = false;
+  bool was_connected_to_deleted_network = this->is_connected() && this->wifi_ssid() == ssid;
+  int8_t original_selected_index = this->selected_sta_index_;
+
+  auto it = std::find_if(this->sta_.begin(), this->sta_.end(),
+                         [&](const WiFiAP &ap) { return ap.get_ssid() == ssid; });
+
+  if (it != this->sta_.end()) {
+    int deleted_index = std::distance(this->sta_.begin(), it);
+    this->sta_.erase(it);
+    removed_from_sta = true;
+
+    // Adjust selected_sta_index_
+    if (this->selected_sta_index_ == deleted_index) {
+      this->selected_sta_index_ = -1;  // Invalidate, let retry logic find a new one
+    } else if (this->selected_sta_index_ > deleted_index) {
+      this->selected_sta_index_--;  // Shift index down
+    }
+  }
+
+  if (found_index == -1 && !removed_from_sta) {
+    ESP_LOGW(TAG, "WiFi " LOG_SECRET("'%s'") " not found in any config, cannot delete.", ssid.c_str());
+    return false;
+  }
+
+  ESP_LOGI(TAG, "WiFi " LOG_SECRET("'%s'") " deleted (total: %d saved)", ssid.c_str(), wifi_list.count);
+
+  // If we were connected to the deleted network, disconnect and let the loop find a new one.
+  if (was_connected_to_deleted_network) {
+    ESP_LOGI(TAG, "Deleted network was active, finding new network.");
+    this->wifi_disconnect_();
+    this->retry_connect();
+  } else if (removed_from_sta && original_selected_index != this->selected_sta_index_ &&
+             (this->state_ == WIFI_COMPONENT_STATE_STA_CONNECTING || this->state_ == WIFI_COMPONENT_STATE_COOLDOWN)) {
+    // If we were trying to connect to the network we just deleted, trigger a retry
+    ESP_LOGD(TAG, "Deleted network was the connection target, finding new network.");
+    this->retry_connect();
+  }
+
+  return true;
+}
+
 void WiFiComponent::clear_saved_wifi_stas() {
   SavedWifiList wifi_list;
   wifi_list.count = 0;

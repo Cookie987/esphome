@@ -396,6 +396,10 @@ class WiFiComponent : public Component {
   /// Integrates seamlessly with YAML-configured WiFi networks
   /// @return true if successful, false if list full or invalid parameters
   bool append_wifi_sta(const std::string &ssid, const std::string &password);
+
+  /// Delete WiFi from persistent storage and from current sta_
+  /// @return true if successful, false if not found
+  bool delete_wifi_sta(const std::string &ssid);
   void clear_saved_wifi_stas();
 
   // ========== INTERNAL METHODS ==========
