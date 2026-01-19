@@ -1015,7 +1015,18 @@ bool WiFiComponent::delete_wifi_sta(const std::string &ssid) {
 
   if (it != this->sta_.end()) {
     int deleted_index = std::distance(this->sta_.begin(), it);
-    this->sta_.erase(it);
+    {
+      FixedVector<WiFiAP> new_sta;
+      if (this->sta_.size() > 1) {
+        new_sta.init(this->sta_.size() - 1);
+        for (auto current_it = this->sta_.begin(); current_it != this->sta_.end(); ++current_it) {
+          if (current_it != it) {
+            new_sta.push_back(*current_it);
+          }
+        }
+      }
+      this->sta_ = std::move(new_sta);
+    }
     removed_from_sta = true;
 
     // Adjust selected_sta_index_
