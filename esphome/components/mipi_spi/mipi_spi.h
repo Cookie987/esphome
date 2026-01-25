@@ -98,6 +98,11 @@ class MipiSpi : public display::Display,
     this->brightness_ = brightness;
     this->reset_params_();
   }
+  void set_madctl(uint8_t madctl) {
+    this->madctl_ = madctl;
+    if (this->is_ready())
+      this->write_command_(MADCTL_CMD, madctl);
+  }
   display::DisplayType get_display_type() override { return display::DisplayType::DISPLAY_TYPE_COLOR; }
 
   int get_width_internal() override { return WIDTH; }
