@@ -487,6 +487,19 @@ bool WiFiComponent::matches_configured_network_(const char *ssid, const uint8_t 
   return false;
 }
 
+void __attribute__((flatten)) WiFiComponent::set_sta_priority(bssid_t bssid, int8_t priority) {
+  for (auto &it : this->sta_priorities_) {
+    if (it.bssid == bssid) {
+      it.priority = priority;
+      return;
+    }
+  }
+  this->sta_priorities_.push_back(WiFiSTAPriority{
+      .bssid = bssid,
+      .priority = priority,
+  });
+}
+
 void WiFiComponent::log_discarded_scan_result_(const char *ssid, const uint8_t *bssid, int8_t rssi, uint8_t channel) {
 #if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
   // Skip logging during roaming scans to avoid log buffer overflow
@@ -613,30 +626,33 @@ void WiFiComponent::start() {
   uint32_t hash = this->has_sta() ? App.get_config_version_hash() : 88491487UL;
 
   this->pref_ = global_preferences->make_preference<wifi::SavedWifiSettings>(hash, true);
+  this->saved_stas_pref_ = global_preferences->make_preference<wifi::SavedWifiSettingsArray>(hash + 2, true);
 #ifdef USE_WIFI_FAST_CONNECT
   this->fast_connect_pref_ = global_preferences->make_preference<wifi::SavedWifiFastConnectSettings>(hash + 1, false);
 #endif
-  this->wifi_list_pref_ = global_preferences->make_preference<wifi::SavedWifiList>(hash + 2, true);
 
-  SavedWifiSettings save{};
-  if (this->pref_.load(&save)) {
-    ESP_LOGD(TAG, "Loaded settings: %s", save.ssid);
-
-    WiFiAP sta{};
-    sta.set_ssid(save.ssid);
-    sta.set_password(save.password);
-    this->set_sta(sta);
-  }
-
-  // Load saved multi-WiFi list from flash
-  SavedWifiList wifi_list{};
-  if (this->wifi_list_pref_.load(&wifi_list) && wifi_list.count > 0) {
-    ESP_LOGD(TAG, "Loaded %d saved WiFi networks from flash", wifi_list.count);
-    for (uint8_t i = 0; i < wifi_list.count; i++) {
-      WiFiAP ap;
-      ap.set_ssid(wifi_list.entries[i].ssid);
-      ap.set_password(wifi_list.entries[i].password);
-      this->add_sta(ap);
+  // Load saved WiFi STAs from array preference
+  SavedWifiSettingsArray saved_array{};
+  if (this->saved_stas_pref_.load(&saved_array) && saved_array.count > 0) {
+    ESP_LOGD(TAG, "Loaded %d saved WiFi STAs", saved_array.count);
+    this->clear_sta();
+    for (uint8_t i = 0; i < saved_array.count; i++) {
+      const SavedWifiSettings &save = saved_array.entries[i];
+      WiFiAP sta{};
+      sta.set_ssid(save.ssid);
+      sta.set_password(save.password);
+      this->add_sta(sta);
+      ESP_LOGD(TAG, "  [%d] SSID: %s", i, save.ssid);
+    }
+  } else {
+    // Fallback to single saved WiFi STA for backward compatibility
+    SavedWifiSettings save{};
+    if (this->pref_.load(&save)) {
+      ESP_LOGD(TAG, "Loaded single saved WiFi STA: %s", save.ssid);
+      WiFiAP sta{};
+      sta.set_ssid(save.ssid);
+      sta.set_password(save.password);
+      this->set_sta(sta);
     }
   }
 
@@ -1056,182 +1072,52 @@ void WiFiComponent::save_wifi_sta(const char *ssid, const char *password) {
   this->connect_soon_();
 }
 
+void WiFiComponent::clear_saved_wifi_stas() {
+  SavedWifiSettingsArray array{};
+  array.count = 0;
+  this->saved_stas_pref_.save(&array);
+  global_preferences->sync();
+  this->clear_sta();
+}
+
+void WiFiComponent::delete_wifi_stas() {
+  // Alias for clear_saved_wifi_stas
+  this->clear_saved_wifi_stas();
+}
+
+void WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &password) {
+  this->append_wifi_sta(ssid.c_str(), password.c_str());
+}
+
+void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
+  SavedWifiSettingsArray array{};
+  if (!this->saved_stas_pref_.load(&array)) {
+    array.count = 0;
+  }
+  if (array.count >= SavedWifiSettingsArray::MAX_SAVED) {
+    ESP_LOGW(TAG, "Cannot append WiFi STA, maximum saved entries reached");
+    return;
+  }
+  SavedWifiSettings &entry = array.entries[array.count];
+  strncpy(entry.ssid, ssid, sizeof(entry.ssid) - 1);
+  strncpy(entry.password, password, sizeof(entry.password) - 1);
+  array.count++;
+  this->saved_stas_pref_.save(&array);
+  global_preferences->sync();
+
+  // Also add to current sta_ list for immediate use
+  WiFiAP ap{};
+  ap.set_ssid(ssid);
+  ap.set_password(password);
+  this->add_sta(ap);
+}
+
 void WiFiComponent::connect_soon_() {
   // Only trigger retry if we're in cooldown - if already connecting/connected, do nothing
   if (this->state_ == WIFI_COMPONENT_STATE_COOLDOWN) {
     ESP_LOGD(TAG, "Exiting cooldown early due to new WiFi credentials");
     this->retry_connect();
   }
-}
-
-bool WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &password) {
-  // Validate input
-  if (ssid.empty() || ssid.length() > 32) {
-    ESP_LOGW(TAG, "Invalid SSID length: %zu (must be 1-32 chars)", ssid.length());
-    return false;
-  }
-  if (password.length() > 64) {
-    ESP_LOGW(TAG, "Invalid password length: %zu (max 64 chars)", password.length());
-    return false;
-  }
-
-  // Load existing saved list
-  SavedWifiList wifi_list{};
-  this->wifi_list_pref_.load(&wifi_list);
-
-  // Check if list is full
-  if (wifi_list.count >= MAX_SAVED_WIFI_ENTRIES) {
-    ESP_LOGW(TAG, "Saved WiFi list full (max %d)", MAX_SAVED_WIFI_ENTRIES);
-    return false;
-  }
-
-  // Check if SSID already exists (in saved list)
-  bool found = false;
-  for (uint8_t i = 0; i < wifi_list.count; i++) {
-    if (strcmp(wifi_list.entries[i].ssid, ssid.c_str()) == 0) {
-      // Update existing entry
-      ESP_LOGD(TAG, "WiFi " LOG_SECRET("'%s'") " already exists, updating", ssid.c_str());
-      strncpy(wifi_list.entries[i].password, password.c_str(), sizeof(wifi_list.entries[i].password) - 1);
-      wifi_list.entries[i].password[sizeof(wifi_list.entries[i].password) - 1] = '\0';
-      found = true;
-      break;
-    }
-  }
-
-  if (!found) {
-    // Add new entry to saved list
-    uint8_t index = wifi_list.count;
-    strncpy(wifi_list.entries[index].ssid, ssid.c_str(), sizeof(wifi_list.entries[index].ssid) - 1);
-    wifi_list.entries[index].ssid[sizeof(wifi_list.entries[index].ssid) - 1] = '\0';
-    strncpy(wifi_list.entries[index].password, password.c_str(), sizeof(wifi_list.entries[index].password) - 1);
-    wifi_list.entries[index].password[sizeof(wifi_list.entries[index].password) - 1] = '\0';
-    wifi_list.count++;
-  }
-
-  // Save to flash
-  if (!this->wifi_list_pref_.save(&wifi_list)) {
-    ESP_LOGE(TAG, "Failed to save WiFi to flash");
-    return false;
-  }
-  global_preferences->sync();
-
-  // Add to sta_ for immediate use (if not already there)
-  bool exists_in_sta = false;
-  for (const auto &ap : this->sta_) {
-    if (ap.get_ssid() == ssid) {
-      exists_in_sta = true;
-      break;
-    }
-  }
-
-  if (!exists_in_sta) {
-    WiFiAP ap;
-    ap.set_ssid(ssid);
-    ap.set_password(password);
-    this->add_sta(ap);
-  }
-
-  ESP_LOGI(TAG, "WiFi " LOG_SECRET("'%s'") " appended (total: %d saved)", ssid.c_str(), wifi_list.count);
-  return true;
-}
-
-bool WiFiComponent::delete_wifi_sta(const std::string &ssid) {
-  // Validate input
-  if (ssid.empty() || ssid.length() > 32) {
-    ESP_LOGW(TAG, "Invalid SSID length for deletion: %zu (must be 1-32 chars)", ssid.length());
-    return false;
-  }
-
-  // Load existing saved list
-  SavedWifiList wifi_list{};
-  this->wifi_list_pref_.load(&wifi_list);
-
-  // Find the index of the SSID to delete in saved list
-  int found_index = -1;
-  for (uint8_t i = 0; i < wifi_list.count; i++) {
-    if (strcmp(wifi_list.entries[i].ssid, ssid.c_str()) == 0) {
-      found_index = i;
-      break;
-    }
-  }
-
-  if (found_index != -1) {
-    ESP_LOGD(TAG, "Deleting WiFi " LOG_SECRET("'%s'") " from saved list", ssid.c_str());
-    // Shift entries to remove the found one
-    for (uint8_t i = found_index; i < wifi_list.count - 1; i++) {
-      wifi_list.entries[i] = wifi_list.entries[i + 1];
-    }
-    wifi_list.count--;
-    // Clear the last entry (which is now a duplicate)
-    memset(&wifi_list.entries[wifi_list.count], 0, sizeof(SavedWifiEntry));
-
-    // Save to flash
-    if (!this->wifi_list_pref_.save(&wifi_list)) {
-      ESP_LOGE(TAG, "Failed to save updated WiFi list to flash");
-      // Continue to try to remove from memory
-    }
-    global_preferences->sync();
-  }
-
-  // Remove from in-memory sta_ vector
-  bool removed_from_sta = false;
-  bool was_connected_to_deleted_network = this->is_connected() && this->wifi_ssid() == ssid;
-  int8_t original_selected_index = this->selected_sta_index_;
-
-  auto it = std::find_if(this->sta_.begin(), this->sta_.end(),
-                         [&](const WiFiAP &ap) { return ap.get_ssid() == ssid; });
-
-  if (it != this->sta_.end()) {
-    int deleted_index = std::distance(this->sta_.begin(), it);
-    {
-      FixedVector<WiFiAP> new_sta;
-      if (this->sta_.size() > 1) {
-        new_sta.init(this->sta_.size() - 1);
-        for (auto current_it = this->sta_.begin(); current_it != this->sta_.end(); ++current_it) {
-          if (current_it != it) {
-            new_sta.push_back(*current_it);
-          }
-        }
-      }
-      this->sta_ = std::move(new_sta);
-    }
-    removed_from_sta = true;
-
-    // Adjust selected_sta_index_
-    if (this->selected_sta_index_ == deleted_index) {
-      this->selected_sta_index_ = -1;  // Invalidate, let retry logic find a new one
-    } else if (this->selected_sta_index_ > deleted_index) {
-      this->selected_sta_index_--;  // Shift index down
-    }
-  }
-
-  if (found_index == -1 && !removed_from_sta) {
-    ESP_LOGW(TAG, "WiFi " LOG_SECRET("'%s'") " not found in any config, cannot delete.", ssid.c_str());
-    return false;
-  }
-
-  ESP_LOGI(TAG, "WiFi " LOG_SECRET("'%s'") " deleted (total: %d saved)", ssid.c_str(), wifi_list.count);
-
-  // If we were connected to the deleted network, disconnect and let the loop find a new one.
-  if (was_connected_to_deleted_network) {
-    ESP_LOGI(TAG, "Deleted network was active, finding new network.");
-    this->wifi_disconnect_();
-    this->retry_connect();
-  } else if (removed_from_sta && original_selected_index != this->selected_sta_index_ &&
-             (this->state_ == WIFI_COMPONENT_STATE_STA_CONNECTING || this->state_ == WIFI_COMPONENT_STATE_COOLDOWN)) {
-    // If we were trying to connect to the network we just deleted, trigger a retry
-    ESP_LOGD(TAG, "Deleted network was the connection target, finding new network.");
-    this->retry_connect();
-  }
-
-  return true;
-}
-
-void WiFiComponent::clear_saved_wifi_stas() {
-  SavedWifiList wifi_list;
-  wifi_list.count = 0;
-  this->wifi_list_pref_.save(&wifi_list);
-  global_preferences->sync();
 }
 
 void WiFiComponent::start_connecting(const WiFiAP &ap) {
