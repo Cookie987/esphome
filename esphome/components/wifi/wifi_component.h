@@ -69,10 +69,17 @@ struct SavedWifiFastConnectSettings {
   int8_t ap_index;
 } PACKED;  // NOLINT
 
-struct SavedWifiSettingsArray {
-  static constexpr uint8_t MAX_SAVED = 10;
+/// Multi-WiFi entry for persistent storage (max 12 networks)
+struct SavedWifiEntry {
+  char ssid[33];      ///< WiFi SSID (max 32 chars)
+  char password[65];  ///< WiFi password (max 64 chars)
+} PACKED;  // NOLINT
+
+/// Container for multiple WiFi configurations (max 12)
+static constexpr uint8_t MAX_SAVED_WIFI_ENTRIES = 12;
+struct SavedWifiList {
   uint8_t count;
-  SavedWifiSettings entries[MAX_SAVED];
+  SavedWifiEntry entries[MAX_SAVED_WIFI_ENTRIES];
 } PACKED;  // NOLINT
 
 enum WiFiComponentState : uint8_t {
@@ -447,12 +454,16 @@ class WiFiComponent : public Component {
   void save_wifi_sta(const std::string &ssid, const std::string &password);
   void save_wifi_sta(const char *ssid, const char *password);
   void save_wifi_sta(StringRef ssid, StringRef password) { this->save_wifi_sta(ssid.c_str(), password.c_str()); }
+  
+  /// Append WiFi to persistent storage and add to current sta_ (max 8 networks)
+  /// Integrates seamlessly with YAML-configured WiFi networks
+  /// @return true if successful, false if list full or invalid parameters
+  bool append_wifi_sta(const std::string &ssid, const std::string &password);
 
+  /// Delete WiFi from persistent storage and from current sta_
+  /// @return true if successful, false if not found
+  bool delete_wifi_sta(const std::string &ssid);
   void clear_saved_wifi_stas();
-  void delete_wifi_stas();
-  void append_wifi_sta(const std::string &ssid, const std::string &password);
-  void append_wifi_sta(const char *ssid, const char *password);
-  void append_wifi_sta(StringRef ssid, StringRef password) { this->append_wifi_sta(ssid.c_str(), password.c_str()); }
 
   // ========== INTERNAL METHODS ==========
   // (In most use cases you won't need these)
@@ -500,11 +511,20 @@ class WiFiComponent : public Component {
     }
     return 0;
   }
-  void set_sta_priority(bssid_t bssid, int8_t priority);
+  void set_sta_priority(const bssid_t bssid, int8_t priority) {
+    for (auto &it : this->sta_priorities_) {
+      if (it.bssid == bssid) {
+        it.priority = priority;
+        return;
+      }
+    }
+    this->sta_priorities_.push_back(WiFiSTAPriority{
+        .bssid = bssid,
+        .priority = priority,
+    });
+  }
 
   network::IPAddresses wifi_sta_ip_addresses();
-  // Remove before 2026.9.0
-  ESPDEPRECATED("Use wifi_ssid_to() instead. Removed in 2026.9.0", "2026.3.0")
   std::string wifi_ssid();
   /// Write SSID to buffer without heap allocation.
   /// Returns pointer to buffer, or empty string if not connected.
@@ -754,7 +774,6 @@ class WiFiComponent : public Component {
   StaticVector<WiFiPowerSaveListener *, ESPHOME_WIFI_POWER_SAVE_LISTENERS> power_save_listeners_;
 #endif
   ESPPreferenceObject pref_;
-  ESPPreferenceObject saved_stas_pref_;
 #ifdef USE_WIFI_FAST_CONNECT
   ESPPreferenceObject fast_connect_pref_;
 #endif
