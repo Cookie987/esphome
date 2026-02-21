@@ -41,7 +41,7 @@ class LvNumber(LvType):
 uint16_t_ptr = cg.uint16.operator("ptr")
 char_ptr = cg.global_ns.namespace("char").operator("ptr")
 void_ptr = cg.void.operator("ptr")
-lv_coord_t = cg.global_ns.namespace("lv_coord_t")
+lv_coord_t = cg.int32
 lv_event_code_t = cg.global_ns.enum("lv_event_code_t")
 lv_indev_type_t = cg.global_ns.enum("lv_indev_type_t")
 lv_key_t = cg.global_ns.enum("lv_key_t")
@@ -61,7 +61,7 @@ lv_style_t = cg.global_ns.struct("lv_style_t")
 lv_pseudo_button_t = lvgl_ns.class_("LvPseudoButton")
 lv_obj_base_t = cg.global_ns.class_("lv_obj_t", lv_pseudo_button_t)
 lv_obj_t_ptr = lv_obj_base_t.operator("ptr")
-lv_disp_t = cg.global_ns.struct("lv_disp_t")
+lv_display_t = cg.global_ns.struct("lv_display_t")
 lv_color_t = cg.global_ns.struct("lv_color_t")
 lv_group_t = cg.global_ns.struct("lv_group_t")
 LVTouchListener = lvgl_ns.class_("LVTouchListener")
@@ -73,7 +73,7 @@ lv_gradient_t = LvType("lv_grad_dsc_t")
 
 LV_EVENT = MockObj(base="LV_EVENT_", op="")
 LV_STATE = MockObj(base="LV_STATE_", op="")
-LV_BTNMATRIX_CTRL = MockObj(base="LV_BTNMATRIX_CTRL_", op="")
+LV_BUTTONMATRIX_CTRL = MockObj(base="LV_BUTTONMATRIX_CTRL_", op="")
 
 
 class LvText(LvType):

@@ -9,8 +9,8 @@ namespace font {
 static const char *const TAG = "font";
 
 #ifdef USE_LVGL_FONT
-const uint8_t *Font::get_glyph_bitmap(const lv_font_t *font, uint32_t unicode_letter) {
-  auto *fe = (Font *) font->dsc;
+const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *dsc, uint32_t unicode_letter, lv_draw_buf_t *buf) {
+  auto *fe = (Font *) dsc->resolved_font->dsc;
   const auto *gd = fe->get_glyph_data_(unicode_letter);
   if (gd == nullptr) {
     return nullptr;

@@ -48,7 +48,7 @@ from .types import (
     LvglAction,
     LvglCondition,
     ObjUpdateAction,
-    lv_disp_t,
+    lv_display_t,
     lv_group_t,
     lv_obj_base_t,
     lv_obj_t,
@@ -158,16 +158,16 @@ async def disp_update(disp, config: dict):
         and CONF_DISP_BG_OPA not in config
     ):
         return
-    with LocalVariable("lv_disp_tmp", lv_disp_t, disp) as disp_temp:
+    with LocalVariable("lv_disp_tmp", lv_display_t, disp) as disp_temp:
         if (bg_color := config.get(CONF_DISP_BG_COLOR)) is not None:
-            lv.disp_set_bg_color(disp_temp, await lv_color.process(bg_color))
+            lv.display_set_bg_color(disp_temp, await lv_color.process(bg_color))
         if bg_image := config.get(CONF_DISP_BG_IMAGE):
             if bg_image == "none":
-                lv.disp_set_bg_image(disp_temp, static_cast("void *", "nullptr"))
+                lv.display_set_bg_image(disp_temp, static_cast("void *", "nullptr"))
             else:
-                lv.disp_set_bg_image(disp_temp, await lv_image.process(bg_image))
+                lv.display_set_bg_image(disp_temp, await lv_image.process(bg_image))
         if (bg_opa := config.get(CONF_DISP_BG_OPA)) is not None:
-            lv.disp_set_bg_opa(disp_temp, await opacity.process(bg_opa))
+            lv.display_set_bg_opa(disp_temp, await opacity.process(bg_opa))
 
 
 @automation.register_action(

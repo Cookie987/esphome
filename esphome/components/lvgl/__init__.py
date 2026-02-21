@@ -215,7 +215,7 @@ def final_validation(config_list):
 async def to_code(configs):
     config_0 = configs[0]
     # Global configuration
-    cg.add_library("lvgl/lvgl", "8.4.0")
+    cg.add_library("lvgl/lvgl", "9.0.0")
     cg.add_define("USE_LVGL")
     # suppress default enabling of extra widgets
     add_define("_LV_KCONFIG_PRESENT")

@@ -11,13 +11,13 @@ from ..types import LvBoolean, WidgetType
 from . import Widget
 from .label import label_spec
 
-lv_button_t = LvBoolean("lv_btn_t")
+lv_button_t = LvBoolean("lv_button_t")
 
 
 class ButtonType(WidgetType):
     def __init__(self):
         super().__init__(
-            CONF_BUTTON, lv_button_t, (CONF_MAIN,), schema=TEXT_SCHEMA, lv_name="btn"
+            CONF_BUTTON, lv_button_t, (CONF_MAIN,), schema=TEXT_SCHEMA, lv_name="button"
         )
 
     def validate(self, value):
@@ -28,7 +28,7 @@ class ButtonType(WidgetType):
         return value
 
     def get_uses(self):
-        return ("btn",)
+        return ("button",)
 
     def on_create(self, var: MockObj, config: dict):
         if CONF_TEXT in config:

@@ -52,38 +52,38 @@ static const display::ColorBitness LV_BITNESS = display::ColorBitness::COLOR_BIT
 
 #ifdef USE_LVGL_FONT
 inline void lv_obj_set_style_text_font(lv_obj_t *obj, const font::Font *font, lv_style_selector_t part) {
-  lv_obj_set_style_text_font(obj, font->get_lv_font(), part);
+  ::lv_obj_set_style_text_font(obj, font->get_lv_font(), part);
 }
 inline void lv_style_set_text_font(lv_style_t *style, const font::Font *font) {
-  lv_style_set_text_font(style, font->get_lv_font());
+  ::lv_style_set_text_font(style, font->get_lv_font());
 }
 #endif
 #ifdef USE_LVGL_IMAGE
 // Shortcut / overload, so that the source of an image can easily be updated
 // from within a lambda.
 inline void lv_img_set_src(lv_obj_t *obj, esphome::image::Image *image) {
-  lv_img_set_src(obj, image->get_lv_img_dsc());
-}
-inline void lv_disp_set_bg_image(lv_disp_t *disp, esphome::image::Image *image) {
-  lv_disp_set_bg_image(disp, image->get_lv_img_dsc());
-}
-
-inline void lv_obj_set_style_bg_img_src(lv_obj_t *obj, esphome::image::Image *image, lv_style_selector_t selector) {
-  lv_obj_set_style_bg_img_src(obj, image->get_lv_img_dsc(), selector);
+  ::lv_img_set_src(obj, image->get_lv_img_dsc());
 }
 #ifdef USE_LVGL_CANVAS
-inline void lv_canvas_draw_img(lv_obj_t *canvas, lv_coord_t x, lv_coord_t y, image::Image *image,
-                               lv_draw_img_dsc_t *dsc) {
-  lv_canvas_draw_img(canvas, x, y, image->get_lv_img_dsc(), dsc);
+inline void lv_canvas_draw_img_from_image(lv_obj_t *canvas, int32_t x, int32_t y, image::Image *image,
+                                          lv_draw_image_dsc_t *dsc) {
+  lv_image_dsc_t *img_src = image->get_lv_img_dsc();
+  if (img_src == nullptr) {
+    return;
+  }
+  lv_area_t coords;
+  coords.x1 = x;
+  coords.y1 = y;
+  coords.x2 = x + img_src->header.w - 1;
+  coords.y2 = y + img_src->header.h - 1;
+  dsc->src = img_src;
+
+  lv_layer_t layer;
+  lv_canvas_init_layer(canvas, &layer);
+  lv_draw_image(&layer, dsc, &coords);
+  lv_canvas_finish_layer(canvas, &layer);
 }
 #endif
-
-#ifdef USE_LVGL_METER
-inline lv_meter_indicator_t *lv_meter_add_needle_img(lv_obj_t *obj, lv_meter_scale_t *scale, esphome::image::Image *src,
-                                                     lv_coord_t pivot_x, lv_coord_t pivot_y) {
-  return lv_meter_add_needle_img(obj, scale, src->get_lv_img_dsc(), pivot_x, pivot_y);
-}
-#endif  // USE_LVGL_METER
 #endif  // USE_LVGL_IMAGE
 #ifdef USE_LVGL_ANIMIMG
 inline void lv_animimg_set_src(lv_obj_t *img, std::vector<image::Image *> images) {
@@ -97,7 +97,7 @@ inline void lv_animimg_set_src(lv_obj_t *img, std::vector<image::Image *> images
   for (auto &image : images) {
     dsc->push_back(image->get_lv_img_dsc());
   }
-  lv_animimg_set_src(img, (const void **) dsc->data(), dsc->size());
+  ::lv_animimg_set_src(img, (const void **) dsc->data(), dsc->size());
 }
 
 #endif  // USE_LVGL_ANIMIMG
@@ -152,7 +152,7 @@ class LvglComponent : public PollingComponent {
  public:
   LvglComponent(std::vector<display::Display *> displays, float buffer_frac, bool full_refresh, int draw_rounding,
                 bool resume_on_input, bool update_when_display_idle);
-  static void static_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
+  static void static_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
 
   float get_setup_priority() const override { return setup_priority::PROCESSOR; }
   void setup() override;
@@ -162,11 +162,11 @@ class LvglComponent : public PollingComponent {
     this->idle_callbacks_.add(std::move(callback));
   }
 
-  static void monitor_cb(lv_disp_drv_t *disp_drv, uint32_t time, uint32_t px);
-  static void render_start_cb(lv_disp_drv_t *disp_drv);
+  static void monitor_cb(lv_display_t *disp, uint32_t time, uint32_t px);
+  static void render_start_cb(lv_display_t *disp);
   void dump_config() override;
-  lv_disp_t *get_disp() { return this->disp_; }
-  lv_obj_t *get_scr_act() { return lv_disp_get_scr_act(this->disp_); }
+  lv_display_t *get_disp() { return this->disp_; }
+  lv_obj_t *get_scr_act() { return lv_display_get_screen_active(this->disp_); }
   // Pause or resume the display.
   // @param paused If true, pause the display. If false, resume the display.
   // @param show_snow If true, show the snow effect when paused.
@@ -190,9 +190,9 @@ class LvglComponent : public PollingComponent {
   static void add_event_cb(lv_obj_t *obj, event_callback_t callback, lv_event_code_t event1, lv_event_code_t event2,
                            lv_event_code_t event3);
   void add_page(LvPageType *page);
-  void show_page(size_t index, lv_scr_load_anim_t anim, uint32_t time);
-  void show_next_page(lv_scr_load_anim_t anim, uint32_t time);
-  void show_prev_page(lv_scr_load_anim_t anim, uint32_t time);
+  void show_page(size_t index, lv_screen_load_anim_t anim, uint32_t time);
+  void show_next_page(lv_screen_load_anim_t anim, uint32_t time);
+  void show_prev_page(lv_screen_load_anim_t anim, uint32_t time);
   void set_page_wrap(bool wrap) { this->page_wrap_ = wrap; }
   size_t get_current_page() const;
   void set_focus_mark(lv_group_t *group) { this->focus_marks_[group] = lv_group_get_focused(group); }
@@ -219,16 +219,14 @@ class LvglComponent : public PollingComponent {
 
   void write_random_();
   void draw_buffer_(const lv_area_t *area, lv_color_t *ptr);
-  void flush_cb_(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
+  void flush_cb_(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
   std::vector<display::Display *> displays_{};
   size_t buffer_frac_{1};
   bool full_refresh_{};
   bool resume_on_input_{};
   bool update_when_display_idle_{};
 
-  lv_disp_draw_buf_t draw_buf_{};
-  lv_disp_drv_t disp_drv_{};
-  lv_disp_t *disp_{};
+  lv_display_t *disp_{};
   bool paused_{};
   std::vector<LvPageType *> pages_{};
   size_t current_page_{0};
@@ -280,10 +278,10 @@ class LVTouchListener : public touchscreen::TouchListener, public Parented<LvglC
     touch_pressed_ = false;
     this->parent_->maybe_wakeup();
   }
-  lv_indev_drv_t *get_drv() { return &this->drv_; }
+  lv_indev_t *get_indev() { return this->indev_; }
 
  protected:
-  lv_indev_drv_t drv_{};
+  lv_indev_t *indev_{};
   touchscreen::TouchPoint touch_point_{};
   bool touch_pressed_{};
 };
@@ -324,10 +322,10 @@ class LVEncoderListener : public Parented<LvglComponent> {
     }
   }
 
-  lv_indev_drv_t *get_drv() { return &this->drv_; }
+  lv_indev_t *get_indev() { return this->indev_; }
 
  protected:
-  lv_indev_drv_t drv_{};
+  lv_indev_t *indev_{};
   bool pressed_{};
   int32_t count_{};
   int32_t last_count_{};
@@ -394,7 +392,7 @@ class LvRollerType : public LvSelectable {
 class LvButtonMatrixType : public key_provider::KeyProvider, public LvCompound {
  public:
   void set_obj(lv_obj_t *lv_obj) override;
-  uint16_t get_selected() { return lv_btnmatrix_get_selected_btn(this->obj); }
+  uint16_t get_selected() { return lv_buttonmatrix_get_selected_button(this->obj); }
   void set_key(size_t idx, uint8_t key) { this->key_map_[idx] = key; }
 
  protected:

@@ -212,7 +212,7 @@ class LvScrActType(WidgetType):
     """
 
     def __init__(self):
-        super().__init__("lv_scr_act()", lv_obj_t, (), is_mock=True)
+        super().__init__("lv_screen_active()", lv_obj_t, (), is_mock=True)
 
     async def to_code(self, w, config: dict):
         return []

@@ -80,7 +80,7 @@ class CanvasType(WidgetType):
                 buf,
                 width,
                 height,
-                literal(f"LV_IMG_CF_TRUE_COLOR{use_alpha}"),
+                literal(f"LV_COLOR_FORMAT_RGB888{use_alpha}"),
             )
 
 

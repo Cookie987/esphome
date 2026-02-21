@@ -54,31 +54,31 @@ class ImgType(WidgetType):
             (CONF_MAIN,),
             IMG_SCHEMA,
             IMG_MODIFY_SCHEMA,
-            lv_name="img",
+            lv_name="image",
         )
 
     def get_uses(self):
-        return "img", CONF_LABEL
+        return "image", CONF_LABEL
 
     async def to_code(self, w: Widget, config):
         if src := config.get(CONF_SRC):
-            lv.img_set_src(w.obj, await lv_image.process(src))
+            lv.image_set_src(w.obj, await lv_image.process(src))
         if (pivot_x := config.get(CONF_PIVOT_X)) and (
             pivot_y := config.get(CONF_PIVOT_Y)
         ):
-            lv.img_set_pivot(
+            lv.image_set_pivot(
                 w.obj, await size.process(pivot_x), await size.process(pivot_y)
             )
         if (cf_angle := config.get(CONF_ANGLE)) is not None:
-            lv.img_set_angle(w.obj, await lv_angle.process(cf_angle))
+            lv.image_set_rotation(w.obj, await lv_angle.process(cf_angle))
         if (img_zoom := config.get(CONF_ZOOM)) is not None:
-            lv.img_set_zoom(w.obj, await zoom.process(img_zoom))
+            lv.image_set_scale(w.obj, await zoom.process(img_zoom))
         if (offset := config.get(CONF_OFFSET_X)) is not None:
-            lv.img_set_offset_x(w.obj, await size.process(offset))
+            lv.image_set_offset_x(w.obj, await size.process(offset))
         if (offset := config.get(CONF_OFFSET_Y)) is not None:
-            lv.img_set_offset_y(w.obj, await size.process(offset))
+            lv.image_set_offset_y(w.obj, await size.process(offset))
         if CONF_ANTIALIAS in config:
-            lv.img_set_antialias(w.obj, await lv_bool.process(config[CONF_ANTIALIAS]))
+            lv.image_set_antialias(w.obj, await lv_bool.process(config[CONF_ANTIALIAS]))
         if mode := config.get(CONF_MODE):
             await w.set_property("size_mode", mode)
 
