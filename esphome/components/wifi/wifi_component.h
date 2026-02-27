@@ -403,6 +403,8 @@ class WiFiComponent : public Component {
   void init_sta(size_t count);
   void add_sta(const WiFiAP &ap);
   void clear_sta();
+  // Returns a reference to the list of saved STA configurations
+  const FixedVector<WiFiAP> &get_sta_list() const { return sta_; }
 
 #ifdef USE_WIFI_AP
   /** Setup an Access Point that should be created if no connection to a station can be made.

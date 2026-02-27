@@ -1080,9 +1080,39 @@ void WiFiComponent::clear_saved_wifi_stas() {
   this->clear_sta();
 }
 
-void WiFiComponent::delete_wifi_stas() {
-  // Alias for clear_saved_wifi_stas
-  this->clear_saved_wifi_stas();
+void WiFiComponent::delete_wifi_stas(const std::string &ssid) {
+  this->delete_wifi_stas(ssid.c_str());
+}
+
+void WiFiComponent::delete_wifi_stas(const char *ssid) { 
+  SavedWifiSettingsArray array{};
+  if (!this->saved_stas_pref_.load(&array)) {
+    ESP_LOGW(TAG, "No saved WiFi STAs to delete");
+    return;
+  }
+  bool modified = false;
+  for (uint8_t i = 0; i < array.count; i++) {
+    if (strcmp(array.entries[i].ssid, ssid) == 0) {
+      // Shift remaining entries down to overwrite the deleted one
+      for (uint8_t j = i; j < array.count - 1; j++) {
+        array.entries[j] = array.entries[j + 1];
+      }
+      array.count--;
+      modified = true;
+      break;  // Assuming SSIDs are unique, we can stop after finding a match
+    }
+  }
+  if (modified) {
+    this->saved_stas_pref_.save(&array);
+    global_preferences->sync();
+    // If the currently active STA was deleted, clear it from memory and trigger reconnect
+    const WiFiAP *current_sta = this->get_selected_sta_();
+    if (current_sta != nullptr && current_sta->ssid_ == ssid) {
+      ESP_LOGI(TAG, "Deleted active WiFi STA " LOG_SECRET("'%s'"), ssid);
+      this->clear_sta();
+      this->connect_soon_();
+    }
+  }
 }
 
 void WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &password) {
