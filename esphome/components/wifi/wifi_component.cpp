@@ -1086,10 +1086,6 @@ void WiFiComponent::delete_wifi_stas(const std::string &ssid) {
 
 void WiFiComponent::delete_wifi_stas(const char *ssid) { 
   SavedWifiSettingsArray array{};
-  if (!this->saved_stas_pref_.load(&array)) {
-    ESP_LOGW(TAG, "No saved WiFi STAs to delete");
-    return;
-  }
   bool modified = false;
   for (uint8_t i = 0; i < array.count; i++) {
     if (strcmp(array.entries[i].ssid, ssid) == 0) {
@@ -1099,6 +1095,7 @@ void WiFiComponent::delete_wifi_stas(const char *ssid) {
       }
       array.count--;
       modified = true;
+      ESP_LOGI(TAG, "Deleted WiFi STA " LOG_SECRET("'%s'"), ssid);
       break;  // Assuming SSIDs are unique, we can stop after finding a match
     }
   }
