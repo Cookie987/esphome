@@ -1087,6 +1087,7 @@ void WiFiComponent::delete_wifi_stas(const std::string &ssid) {
 void WiFiComponent::delete_wifi_stas(const char *ssid) { 
   SavedWifiSettingsArray array{};
   bool modified = false;
+  this->saved_stas_pref_.load(&array);
   for (uint8_t i = 0; i < array.count; i++) {
     if (strcmp(array.entries[i].ssid, ssid) == 0) {
       // Shift remaining entries down to overwrite the deleted one
