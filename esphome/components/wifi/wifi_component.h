@@ -451,7 +451,8 @@ class WiFiComponent : public Component {
   void save_wifi_sta(StringRef ssid, StringRef password) { this->save_wifi_sta(ssid.c_str(), password.c_str()); }
 
   void clear_saved_wifi_stas();
-  void delete_wifi_stas();
+  void delete_wifi_stas(const std::string &ssid);
+  void delete_wifi_stas(const char *ssid);
   void append_wifi_sta(const std::string &ssid, const std::string &password);
   void append_wifi_sta(const char *ssid, const char *password);
   void append_wifi_sta(StringRef ssid, StringRef password) { this->append_wifi_sta(ssid.c_str(), password.c_str()); }
