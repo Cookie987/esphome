@@ -1119,25 +1119,66 @@ void WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &
 
 void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
   SavedWifiSettingsArray array{};
+  
+  // 尝试加载已保存的WiFi数组
   if (!this->saved_stas_pref_.load(&array)) {
+    // 如果加载失败，初始化为空数组
     array.count = 0;
+    memset(&array, 0, sizeof(array));
   }
+  
+  // 检查是否已达到最大保存数量
   if (array.count >= SavedWifiSettingsArray::MAX_SAVED) {
-    ESP_LOGW(TAG, "Cannot append WiFi STA, maximum saved entries reached");
+    ESP_LOGW(TAG, "Cannot append WiFi STA, maximum saved entries (%d) reached", 
+            SavedWifiSettingsArray::MAX_SAVED);
     return;
   }
+  
+  // 检查SSID是否已经存在，避免重复添加
+  for (uint8_t i = 0; i < array.count; i++) {
+    if (strcmp(array.entries[i].ssid, ssid) == 0) {
+      ESP_LOGD(TAG, "WiFi SSID '%s' already exists, updating password", ssid);
+      strncpy(array.entries[i].password, password, sizeof(array.entries[i].password) - 1);
+      array.entries[i].password[sizeof(array.entries[i].password) - 1] = '\0';
+      
+      // 保存更新后的数组
+      this->saved_stas_pref_.save(&array);
+      global_preferences->sync();
+      
+      // 更新内存中的STA列表
+      for (auto &ap : this->sta_) {
+        if (ap.get_ssid() == ssid) {
+          ap.set_password(password);
+          break;
+        }
+      }
+      return;
+    }
+  }
+  
+  // 添加新的WiFi条目
   SavedWifiSettings &entry = array.entries[array.count];
   strncpy(entry.ssid, ssid, sizeof(entry.ssid) - 1);
+  entry.ssid[sizeof(entry.ssid) - 1] = '\0';  // 确保null终止
   strncpy(entry.password, password, sizeof(entry.password) - 1);
+  entry.password[sizeof(entry.password) - 1] = '\0';  // 确保null终止
   array.count++;
-  this->saved_stas_pref_.save(&array);
+  
+  // 保存到flash
+  if (!this->saved_stas_pref_.save(&array)) {
+    ESP_LOGE(TAG, "Failed to save WiFi STA to flash");
+    return;
+  }
   global_preferences->sync();
 
-  // Also add to current sta_ list for immediate use
+  // 同时添加到当前sta_列表以便立即使用
   WiFiAP ap{};
   ap.set_ssid(ssid);
   ap.set_password(password);
   this->add_sta(ap);
+  
+  ESP_LOGI(TAG, "WiFi STA '%s' appended successfully (total: %d/%d)", 
+          ssid, array.count, SavedWifiSettingsArray::MAX_SAVED);
 }
 
 void WiFiComponent::connect_soon_() {
