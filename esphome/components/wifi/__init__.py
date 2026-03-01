@@ -446,7 +446,7 @@ async def to_code(config):
     # Initialize FixedVector with the count of networks
     networks = config.get(CONF_NETWORKS, [])
     if networks:
-        cg.add(var.init_sta(len(networks)))
+        cg.add(var.init_sta(len(networks) + 10))  # Add extra capacity for single network config and future expansion
 
         def add_sta(ap: cg.MockObj, network: dict) -> None:
             ip_config = network.get(CONF_MANUAL_IP, config.get(CONF_MANUAL_IP))
