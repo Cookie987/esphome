@@ -120,6 +120,7 @@ def generate_lv_conf_h():
     definitions.append("#define LV_USE_PNG 1")
     definitions.append("#define LV_IMG_CACHE_DEF_SIZE 10")
     definitions.append("#define LV_FS_POSIX_LETTER 'A'")
+    definitions.append("#define LV_LABEL_LONG_TXT_HINT 1")
     # definitions.append("#define LV_USE_IME_PINYIN 1")
     # definitions.append("#define LV_IME_PINYIN_USE_DEFAULT_DICT 1")
     # definitions.append("#define LV_IME_PINYIN_USE_K9_MODE 1")
