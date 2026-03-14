@@ -7,6 +7,10 @@
 #include "esphome/components/display/display_color_utils.h"
 #include "esphome/core/helpers.h"
 
+#ifdef USE_ESP32
+#include "esp_heap_caps.h"
+#endif
+
 namespace esphome {
 namespace mipi_spi {
 
@@ -95,6 +99,8 @@ class MipiSpi : public display::Display,
   void set_reset_pin(GPIOPin *reset_pin) { this->reset_pin_ = reset_pin; }
   void set_enable_pins(std::vector<GPIOPin *> enable_pins) { this->enable_pins_ = std::move(enable_pins); }
   void set_dc_pin(GPIOPin *dc_pin) { this->dc_pin_ = dc_pin; }
+  void set_use_dma(bool use_dma) { this->use_dma_ = use_dma; }
+  void set_double_buffer(bool double_buffer) { this->double_buffer_ = double_buffer; }
   void set_invert_colors(bool invert_colors) {
     this->invert_colors_ = invert_colors;
     this->reset_params_();
@@ -416,6 +422,8 @@ class MipiSpi : public display::Display,
   const char *model_{"Unknown"};
   std::vector<uint8_t> init_sequence_{};
   uint8_t madctl_{};
+  bool use_dma_{false};
+  bool double_buffer_{false};
 };
 
 /**
@@ -455,18 +463,33 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
                     "  Buffer pixels: %d bits\n"
                     "  Buffer fraction: 1/%d\n"
                     "  Buffer bytes: %zu\n"
-                    "  Draw rounding: %u",
+                    "  Draw rounding: %u\n"
+                    "  Use DMA: %s\n"
+                    "  Double buffer: %s",
                     this->rotation_, BUFFERPIXEL * 8, FRACTION,
-                    sizeof(BUFFERTYPE) * BUFFER_WIDTH * BUFFER_HEIGHT / FRACTION, ROUNDING);
+                    sizeof(BUFFERTYPE) * BUFFER_WIDTH * BUFFER_HEIGHT / FRACTION, ROUNDING, YESNO(this->use_dma_),
+                    YESNO(this->double_buffer_));
   }
 
   void setup() override {
     MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DISPLAYPIXEL, BUS_TYPE, WIDTH, HEIGHT, OFFSET_WIDTH,
             OFFSET_HEIGHT>::setup();
-    RAMAllocator<BUFFERTYPE> allocator{};
-    this->buffer_ = allocator.allocate(BUFFER_WIDTH * BUFFER_HEIGHT / FRACTION);
+    if (this->double_buffer_ && !this->auto_clear_enabled_) {
+      esph_log_w(TAG, "double_buffer requires auto_clear_enabled; disabling double_buffer");
+      this->double_buffer_ = false;
+    }
+    this->buffer_ = this->allocate_buffer_(BUFFER_WIDTH * BUFFER_HEIGHT / FRACTION);
     if (this->buffer_ == nullptr) {
       this->mark_failed(LOG_STR("Buffer allocation failed"));
+      return;
+    }
+    this->active_buffer_ = this->buffer_;
+    if (this->double_buffer_) {
+      this->buffer2_ = this->allocate_buffer_(BUFFER_WIDTH * BUFFER_HEIGHT / FRACTION);
+      if (this->buffer2_ == nullptr) {
+        this->mark_failed(LOG_STR("Double buffer allocation failed"));
+        return;
+      }
     }
   }
 
@@ -509,8 +532,11 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
       this->y_high_ = (this->y_high_ + ROUNDING) / ROUNDING * ROUNDING - 1;
       int w = this->x_high_ - this->x_low_ + 1;
       int h = this->y_high_ - this->y_low_ + 1;
-      this->write_to_display_(this->x_low_, this->y_low_, w, h, this->buffer_, this->x_low_,
+      this->write_to_display_(this->x_low_, this->y_low_, w, h, this->active_buffer_, this->x_low_,
                               this->y_low_ - this->start_line_, BUFFER_WIDTH - w);
+      if (this->double_buffer_) {
+        this->active_buffer_ = (this->active_buffer_ == this->buffer_) ? this->buffer2_ : this->buffer_;
+      }
       // invalidate watermarks
       this->x_low_ = WIDTH;
       this->y_low_ = HEIGHT;
@@ -533,7 +559,7 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
     rotate_coordinates(x, y);
     if (x < 0 || x >= WIDTH || y < this->start_line_ || y >= this->end_line_)
       return;
-    this->buffer_[(y - this->start_line_) * BUFFER_WIDTH + x] = convert_color(color);
+    this->active_buffer_[(y - this->start_line_) * BUFFER_WIDTH + x] = convert_color(color);
     if (x < this->x_low_) {
       this->x_low_ = x;
     }
@@ -560,7 +586,7 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
     this->y_low_ = this->start_line_;
     this->x_high_ = WIDTH - 1;
     this->y_high_ = this->end_line_ - 1;
-    std::fill_n(this->buffer_, HEIGHT * BUFFER_WIDTH / FRACTION, convert_color(color));
+    std::fill_n(this->active_buffer_, HEIGHT * BUFFER_WIDTH / FRACTION, convert_color(color));
   }
 
   int get_width() override {
@@ -606,7 +632,24 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
     return static_cast<BUFFERTYPE>(0);
   }
 
+  BUFFERTYPE *allocate_buffer_(size_t count) {
+#ifdef USE_ESP32
+    if (this->use_dma_) {
+      auto *ptr = static_cast<BUFFERTYPE *>(heap_caps_malloc(
+          count * sizeof(BUFFERTYPE), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+      if (ptr != nullptr) {
+        return ptr;
+      }
+      esph_log_w(TAG, "DMA-capable buffer allocation failed, falling back");
+    }
+#endif
+    RAMAllocator<BUFFERTYPE> allocator{};
+    return allocator.allocate(count);
+  }
+
   BUFFERTYPE *buffer_{};
+  BUFFERTYPE *buffer2_{};
+  BUFFERTYPE *active_buffer_{};
   uint16_t x_low_{WIDTH};
   uint16_t y_low_{HEIGHT};
   uint16_t x_high_{0};

@@ -12,6 +12,7 @@ import esphome.config_validation as cv
 from esphome.const import (
     CONF_AUTO_CLEAR_ENABLED,
     CONF_BUFFER_SIZE,
+    CONF_DOUBLE_BUFFER,
     CONF_GROUP,
     CONF_ID,
     CONF_LAMBDA,
@@ -22,6 +23,7 @@ from esphome.const import (
     CONF_TIMEOUT,
     CONF_TRIGGER_ID,
     CONF_TYPE,
+    CONF_USE_DMA,
 )
 from esphome.core import CORE, ID, Lambda
 from esphome.cpp_generator import MockObj
@@ -302,6 +304,8 @@ async def to_code(configs):
             config[CONF_DRAW_ROUNDING],
             config[df.CONF_RESUME_ON_INPUT],
             config[df.CONF_UPDATE_WHEN_DISPLAY_IDLE],
+            config[CONF_USE_DMA],
+            config[CONF_DOUBLE_BUFFER],
         )
         await cg.register_component(lv_component, config)
         Widget.create(config[CONF_ID], lv_component, LvScrActType(), config)
@@ -405,6 +409,8 @@ LVGL_SCHEMA = cv.All(
                 ): cv.boolean,
                 cv.Optional(CONF_DRAW_ROUNDING, default=2): cv.positive_int,
                 cv.Optional(CONF_BUFFER_SIZE, default=0): cv.percentage,
+                cv.Optional(CONF_USE_DMA, default=False): cv.boolean,
+                cv.Optional(CONF_DOUBLE_BUFFER, default=False): cv.boolean,
                 cv.Optional(CONF_LOG_LEVEL, default="WARN"): cv.one_of(
                     *df.LV_LOG_LEVELS, upper=True
                 ),

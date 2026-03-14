@@ -38,6 +38,7 @@ from esphome.const import (
     CONF_DC_PIN,
     CONF_DIMENSIONS,
     CONF_DISABLED,
+    CONF_DOUBLE_BUFFER,
     CONF_ENABLE_PIN,
     CONF_ID,
     CONF_INIT_SEQUENCE,
@@ -50,6 +51,7 @@ from esphome.const import (
     CONF_ROTATION,
     CONF_SWAP_XY,
     CONF_TRANSFORM,
+    CONF_USE_DMA,
     CONF_WIDTH,
 )
 from esphome.core import CORE
@@ -211,6 +213,8 @@ def model_schema(config):
                 cv.Optional(CONF_BUFFER_SIZE): cv.All(
                     cv.percentage, cv.Range(0.12, 1.0)
                 ),
+                cv.Optional(CONF_USE_DMA, default=False): cv.boolean,
+                cv.Optional(CONF_DOUBLE_BUFFER, default=False): cv.boolean,
             }
         )
         .extend({model.option(x): cv.boolean for x in other_options})
@@ -442,5 +446,9 @@ async def to_code(config):
             lamb, [(display.DisplayRef, "it")], return_type=cg.void
         )
         cg.add(var.set_writer(lambda_))
+    if CONF_USE_DMA in config:
+        cg.add(var.set_use_dma(config[CONF_USE_DMA]))
+    if CONF_DOUBLE_BUFFER in config:
+        cg.add(var.set_double_buffer(config[CONF_DOUBLE_BUFFER]))
     await display.register_display(var, config)
     await spi.register_spi_device(var, config, write_only=True)

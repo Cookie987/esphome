@@ -105,9 +105,11 @@ void LvglComponent::dump_config() {
                 "  Display width/height: %d x %d\n"
                 "  Buffer size: %zu%%\n"
                 "  Rotation: %d\n"
-                "  Draw rounding: %d",
+                "  Draw rounding: %d\n"
+                "  Use DMA: %s\n"
+                "  Double buffer: %s",
                 this->disp_drv_.hor_res, this->disp_drv_.ver_res, 100 / this->buffer_frac_, this->rotation,
-                (int) this->draw_rounding);
+                (int) this->draw_rounding, YESNO(this->use_dma_), YESNO(this->double_buffer_));
 }
 
 void LvglComponent::set_paused(bool paused, bool show_snow) {
@@ -461,13 +463,16 @@ void LvglComponent::write_random_() {
  *                         presses a key or clicks on the screen.
  */
 LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buffer_frac, bool full_refresh,
-                             int draw_rounding, bool resume_on_input, bool update_when_display_idle)
+                             int draw_rounding, bool resume_on_input, bool update_when_display_idle, bool use_dma,
+                             bool double_buffer)
     : draw_rounding(draw_rounding),
       displays_(std::move(displays)),
       buffer_frac_(buffer_frac),
       full_refresh_(full_refresh),
       resume_on_input_(resume_on_input),
-      update_when_display_idle_(update_when_display_idle) {
+      update_when_display_idle_(update_when_display_idle),
+      use_dma_(use_dma),
+      double_buffer_(double_buffer) {
   lv_disp_draw_buf_init(&this->draw_buf_, nullptr, nullptr, 0);
   lv_disp_drv_init(&this->disp_drv_);
   this->disp_drv_.draw_buf = &this->draw_buf_;
@@ -476,6 +481,26 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
   this->disp_drv_.flush_cb = static_flush_cb;
   this->disp_drv_.rounder_cb = rounder_cb;
   this->disp_ = lv_disp_drv_register(&this->disp_drv_);
+}
+
+void *LvglComponent::allocate_draw_buffer_(size_t size) {
+#ifdef USE_ESP32
+  if (this->use_dma_) {
+    void *ptr =
+        heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    if (ptr != nullptr) {
+      ESP_LOGV(TAG, "Allocated DMA-capable draw buffer %zu bytes at %p", size, ptr);
+      return ptr;
+    }
+    ESP_LOGW(TAG, "DMA-capable allocation failed, falling back to default allocator");
+  }
+#endif
+  void *buffer = nullptr;
+  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
+    buffer = malloc(size);  // NOLINT
+  if (buffer == nullptr)
+    buffer = lv_custom_mem_alloc(size);  // NOLINT
+  return buffer;
 }
 
 void LvglComponent::setup() {
@@ -489,17 +514,13 @@ void LvglComponent::setup() {
     frac = 1;
   size_t buffer_pixels = width * height / frac;
   auto buf_bytes = buffer_pixels * LV_COLOR_DEPTH / 8;
-  void *buffer = nullptr;
-  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
-    buffer = malloc(buf_bytes);  // NOLINT
-  if (buffer == nullptr)
-    buffer = lv_custom_mem_alloc(buf_bytes);  // NOLINT
+  void *buffer = this->allocate_draw_buffer_(buf_bytes);
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
     frac = MIN_BUFFER_FRAC;
     buffer_pixels /= MIN_BUFFER_FRAC;
     buf_bytes /= MIN_BUFFER_FRAC;
-    buffer = lv_custom_mem_alloc(buf_bytes);  // NOLINT
+    buffer = this->allocate_draw_buffer_(buf_bytes);
   }
   this->buffer_frac_ = frac;
   if (buffer == nullptr) {
@@ -507,7 +528,16 @@ void LvglComponent::setup() {
     this->mark_failed();
     return;
   }
-  lv_disp_draw_buf_init(&this->draw_buf_, buffer, nullptr, buffer_pixels);
+  void *buffer2 = nullptr;
+  if (this->double_buffer_) {
+    buffer2 = this->allocate_draw_buffer_(buf_bytes);
+    if (buffer2 == nullptr) {
+      this->status_set_error(LOG_STR("Double buffer allocation failure"));
+      this->mark_failed();
+      return;
+    }
+  }
+  lv_disp_draw_buf_init(&this->draw_buf_, buffer, buffer2, buffer_pixels);
   this->disp_drv_.hor_res = display->get_width();
   this->disp_drv_.ver_res = display->get_height();
   lv_disp_drv_update(this->disp_, &this->disp_drv_);
