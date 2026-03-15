@@ -248,6 +248,18 @@ class SPIDelegate {
       ptr[i] = this->transfer(0);
   }
 
+  // queue a write for async DMA transfer; returns true if queued asynchronously.
+  virtual bool queue_write_array(const uint8_t *ptr, size_t length) {
+    this->write_array(ptr, length);
+    return false;
+  }
+
+  // poll for completion of any queued async transfers; returns true when complete.
+  virtual bool queue_poll_done() { return true; }
+
+  // check if async queue has in-flight transfers.
+  virtual bool queue_is_busy() const { return false; }
+
   // check if device is ready
   virtual bool is_ready();
 

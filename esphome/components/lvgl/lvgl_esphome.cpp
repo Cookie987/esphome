@@ -239,6 +239,19 @@ void LvglComponent::draw_buffer_(const lv_area_t *area, lv_color_t *ptr) {
 void LvglComponent::flush_cb_(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
   if (!this->is_paused()) {
     auto now = millis();
+    if (!this->async_flush_pending_ && this->rotation == display::DISPLAY_ROTATION_0_DEGREES &&
+        this->displays_.size() == 1) {
+      auto *disp = this->displays_[0];
+      if (disp->start_async_write(area->x1, area->y1, lv_area_get_width(area), lv_area_get_height(area),
+                                  reinterpret_cast<const uint8_t *>(color_p), display::COLOR_ORDER_RGB, LV_BITNESS,
+                                  LV_COLOR_16_SWAP, 0, 0, 0)) {
+        this->async_flush_pending_ = true;
+        this->async_display_ = disp;
+        ESP_LOGVV(TAG, "flush_cb async start, area=%d/%d, %d/%d", area->x1, area->y1, lv_area_get_width(area),
+                  lv_area_get_height(area));
+        return;
+      }
+    }
     this->draw_buffer_(area, color_p);
     ESP_LOGVV(TAG, "flush_cb, area=%d/%d, %d/%d took %dms", area->x1, area->y1, lv_area_get_width(area),
               lv_area_get_height(area), (int) (millis() - now));
@@ -582,6 +595,12 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
+  if (this->async_flush_pending_ && this->async_display_ != nullptr) {
+    if (this->async_display_->update_async_write()) {
+      this->async_flush_pending_ = false;
+      lv_disp_flush_ready(&this->disp_drv_);
+    }
+  }
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();

@@ -360,6 +360,19 @@ class Display : public PollingComponent {
   virtual void draw_pixels_at(int x_start, int y_start, int w, int h, const uint8_t *ptr, ColorOrder order,
                               ColorBitness bitness, bool big_endian, int x_offset, int y_offset, int x_pad);
 
+  /// Start an async pixel write if supported. Returns true if async transfer started.
+  virtual bool start_async_write(int x_start, int y_start, int w, int h, const uint8_t *ptr, ColorOrder order,
+                                 ColorBitness bitness, bool big_endian, int x_offset, int y_offset, int x_pad) {
+    this->draw_pixels_at(x_start, y_start, w, h, ptr, order, bitness, big_endian, x_offset, y_offset, x_pad);
+    return false;
+  }
+
+  /// Poll/complete an async write. Returns true when the async transfer is fully completed.
+  virtual bool update_async_write() { return true; }
+
+  /// Returns true if an async write is currently in progress.
+  virtual bool is_async_write_in_progress() const { return false; }
+
   /// Convenience overload for base case where the pixels are packed into the buffer with no gaps (e.g. suits LVGL.)
   void draw_pixels_at(int x_start, int y_start, int w, int h, const uint8_t *ptr, ColorOrder order,
                       ColorBitness bitness, bool big_endian) {

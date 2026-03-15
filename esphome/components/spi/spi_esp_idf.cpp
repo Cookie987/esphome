@@ -1,4 +1,5 @@
 #include "spi.h"
+#include <cstring>
 #include <vector>
 
 namespace esphome::spi {
@@ -183,6 +184,64 @@ class SPIDelegateHw : public SPIDelegate {
 
   void read_array(uint8_t *ptr, size_t length) override { this->transfer(nullptr, ptr, length); }
 
+  bool queue_write_array(const uint8_t *ptr, size_t length) override {
+    if (this->queued_active_) {
+      ESP_LOGW(TAG, "Queue already active");
+      return false;
+    }
+    if (length == 0)
+      return false;
+    size_t chunks = (length + MAX_TRANSFER_SIZE - 1) / MAX_TRANSFER_SIZE;
+    this->queued_descs_.clear();
+    this->queued_descs_.resize(chunks);
+    this->queued_pending_ = 0;
+    for (size_t i = 0; i < chunks; i++) {
+      size_t const partial = std::min(length, MAX_TRANSFER_SIZE);
+      spi_transaction_t &desc = this->queued_descs_[i];
+      memset(&desc, 0, sizeof(desc));
+      desc.length = partial * 8;
+      desc.rxlength = 0;
+      desc.tx_buffer = ptr;
+      desc.rx_buffer = nullptr;
+      esp_err_t err = spi_device_queue_trans(this->handle_, &desc, portMAX_DELAY);
+      if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Queue transmit failed - err %X", err);
+        this->queued_descs_.clear();
+        this->queued_pending_ = 0;
+        this->queued_active_ = false;
+        return false;
+      }
+      this->queued_pending_++;
+      length -= partial;
+      ptr += partial;
+    }
+    this->queued_active_ = true;
+    return true;
+  }
+
+  bool queue_poll_done() override {
+    if (!this->queued_active_)
+      return true;
+    while (this->queued_pending_ != 0) {
+      spi_transaction_t *done{};
+      esp_err_t err = spi_device_get_trans_result(this->handle_, &done, 0);
+      if (err == ESP_ERR_TIMEOUT)
+        return false;
+      if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Transmit failed - err %X", err);
+        this->queued_pending_ = 0;
+        this->queued_active_ = false;
+        return true;
+      }
+      this->queued_pending_--;
+    }
+    this->queued_active_ = false;
+    this->queued_descs_.clear();
+    return true;
+  }
+
+  bool queue_is_busy() const override { return this->queued_active_; }
+
  protected:
   bool add_device_() {
     spi_device_interface_config_t config = {};
@@ -190,7 +249,7 @@ class SPIDelegateHw : public SPIDelegate {
     config.clock_speed_hz = static_cast<int>(this->data_rate_);
     config.spics_io_num = -1;
     config.flags = 0;
-    config.queue_size = 1;
+    config.queue_size = 2;
     config.pre_cb = nullptr;
     config.post_cb = nullptr;
     if (this->bit_order_ == BIT_ORDER_LSB_FIRST)
@@ -212,6 +271,9 @@ class SPIDelegateHw : public SPIDelegate {
   spi_device_handle_t handle_{};
   bool release_device_{false};
   bool write_only_{false};
+  std::vector<spi_transaction_t> queued_descs_{};
+  size_t queued_pending_{0};
+  bool queued_active_{false};
 };
 
 class SPIBusHw : public SPIBus {

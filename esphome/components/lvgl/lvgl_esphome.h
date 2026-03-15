@@ -245,6 +245,8 @@ class LvglComponent : public PollingComponent {
   Trigger<> *draw_start_callback_{};
   Trigger<> *draw_end_callback_{};
   lv_color_t *rotate_buf_{};
+  display::Display *async_display_{nullptr};
+  bool async_flush_pending_{false};
 };
 
 class IdleTrigger : public Trigger<> {

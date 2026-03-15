@@ -95,6 +95,44 @@ class MipiSpi : public display::Display,
   MipiSpi() = default;
   void update() override { this->stop_poller(); }
   void draw_pixel_at(int x, int y, Color color) override {}
+  bool start_async_write(int x_start, int y_start, int w, int h, const uint8_t *ptr, display::ColorOrder order,
+                         display::ColorBitness bitness, bool big_endian, int x_offset, int y_offset,
+                         int x_pad) override {
+    if (this->is_failed() || this->async_in_progress_)
+      return false;
+    if (!this->use_dma_ || !this->double_buffer_)
+      return false;
+    if (x_offset != 0 || y_offset != 0 || x_pad != 0)
+      return false;
+    if (get_pixel_mode(bitness) != BUFFERPIXEL || big_endian != IS_BIG_ENDIAN)
+      return false;
+    if constexpr (BUS_TYPE != BUS_TYPE_SINGLE && BUS_TYPE != BUS_TYPE_SINGLE_16) {
+      return false;
+    }
+    if (w <= 0 || h <= 0)
+      return false;
+    this->set_addr_window_(x_start, y_start, x_start + w - 1, y_start + h - 1);
+    this->enable();
+    size_t total_bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * static_cast<size_t>(BUFFERPIXEL);
+    if (!this->delegate_->queue_write_array(ptr, total_bytes)) {
+      this->disable();
+      return false;
+    }
+    this->async_in_progress_ = true;
+    return true;
+  }
+
+  bool update_async_write() override {
+    if (!this->async_in_progress_)
+      return true;
+    if (!this->delegate_->queue_poll_done())
+      return false;
+    this->disable();
+    this->async_in_progress_ = false;
+    return true;
+  }
+
+  bool is_async_write_in_progress() const override { return this->async_in_progress_; }
   void set_model(const char *model) { this->model_ = model; }
   void set_reset_pin(GPIOPin *reset_pin) { this->reset_pin_ = reset_pin; }
   void set_enable_pins(std::vector<GPIOPin *> enable_pins) { this->enable_pins_ = std::move(enable_pins); }
@@ -424,6 +462,7 @@ class MipiSpi : public display::Display,
   uint8_t madctl_{};
   bool use_dma_{false};
   bool double_buffer_{false};
+  bool async_in_progress_{false};
 };
 
 /**
