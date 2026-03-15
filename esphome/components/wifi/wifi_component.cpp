@@ -764,17 +764,23 @@ void WiFiComponent::loop() {
         // Skip cooldown if new credentials were provided while connecting
         if (this->skip_cooldown_next_cycle_) {
           this->skip_cooldown_next_cycle_ = false;
+          this->cooldown_off_active_ = false;
+          this->cooldown_failures_ = 0;
           this->check_connecting_finished(now);
           break;
         }
         // Use longer cooldown when captive portal/improv is active to avoid disrupting user config
         bool portal_active = this->is_captive_portal_active_() || this->is_esp32_improv_active_();
         uint32_t cooldown_duration = portal_active ? WIFI_COOLDOWN_WITH_AP_ACTIVE_MS : WIFI_COOLDOWN_DURATION_MS;
+        if (this->cooldown_off_active_) {
+          cooldown_duration = this->cooldown_off_time_;
+        }
         if (now - this->action_started_ > cooldown_duration) {
           // After cooldown we either restarted the adapter because of
           // a failure, or something tried to connect over and over
           // so we entered cooldown. In both cases we call
           // check_connecting_finished to continue the state machine.
+          this->cooldown_off_active_ = false;
           this->check_connecting_finished(now);
         }
         break;
@@ -1621,6 +1627,8 @@ void WiFiComponent::check_connecting_finished(uint32_t now) {
     // Reset to initial phase on successful connection (don't log transition, just reset state)
     this->retry_phase_ = WiFiRetryPhase::INITIAL_CONNECT;
     this->num_retried_ = 0;
+    this->cooldown_failures_ = 0;
+    this->cooldown_off_active_ = false;
     if (this->has_ap()) {
 #ifdef USE_CAPTIVE_PORTAL
       if (this->is_captive_portal_active_()) {
@@ -2148,6 +2156,10 @@ void WiFiComponent::retry_connect() {
 
   this->log_and_adjust_priority_for_failed_connect_();
 
+  if (this->maybe_start_cooldown_off_()) {
+    return;
+  }
+
   // Determine next retry phase based on current state
   WiFiRetryPhase current_phase = this->retry_phase_;
   WiFiRetryPhase next_phase = this->determine_next_phase_();
@@ -2198,6 +2210,38 @@ void WiFiComponent::set_power_save_mode(WiFiPowerSaveMode power_save) {
 }
 
 void WiFiComponent::set_passive_scan(bool passive) { this->passive_scan_ = passive; }
+
+bool WiFiComponent::maybe_start_cooldown_off_() {
+  if (this->cooldown_off_time_ == 0 || this->cooldown_off_attempts_ == 0) {
+    return false;
+  }
+  if (this->cooldown_off_active_) {
+    return false;
+  }
+  if (this->is_captive_portal_active_() || this->is_esp32_improv_active_()) {
+    return false;
+  }
+#ifdef USE_WIFI_AP
+  if (this->ap_setup_) {
+    return false;
+  }
+#endif
+
+  this->cooldown_failures_++;
+  if (this->cooldown_failures_ < this->cooldown_off_attempts_) {
+    return false;
+  }
+
+  this->cooldown_failures_ = 0;
+  this->cooldown_off_active_ = true;
+  ESP_LOGW(TAG, "Entering WiFi cooldown for %" PRIu32 " ms after %u failed attempts", this->cooldown_off_time_,
+           this->cooldown_off_attempts_);
+  this->wifi_disconnect_();
+  this->wifi_mode_(false, false);
+  this->state_ = WIFI_COMPONENT_STATE_COOLDOWN;
+  this->action_started_ = millis();
+  return true;
+}
 
 bool WiFiComponent::is_captive_portal_active_() {
 #ifdef USE_CAPTIVE_PORTAL

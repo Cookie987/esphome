@@ -445,6 +445,8 @@ class WiFiComponent : public Component {
   void set_output_power(float output_power) { output_power_ = output_power; }
 
   void set_passive_scan(bool passive);
+  void set_cooldown_off_time(uint32_t cooldown_off_time) { cooldown_off_time_ = cooldown_off_time; }
+  void set_cooldown_off_attempts(uint8_t cooldown_off_attempts) { cooldown_off_attempts_ = cooldown_off_attempts; }
 
   void save_wifi_sta(const std::string &ssid, const std::string &password);
   void save_wifi_sta(const char *ssid, const char *password);
@@ -737,6 +739,8 @@ class WiFiComponent : public Component {
   void wifi_scan_done_callback_();
 #endif
 
+  bool maybe_start_cooldown_off_();
+
   // Large/pointer-aligned members first
   FixedVector<WiFiAP> sta_;
   std::vector<WiFiSTAPriority> sta_priorities_;
@@ -786,6 +790,7 @@ class WiFiComponent : public Component {
 #ifdef USE_WIFI_AP
   uint32_t ap_timeout_{};
 #endif
+  uint32_t cooldown_off_time_{0};
 
   // 1-byte enums and integers
   WiFiComponentState state_{WIFI_COMPONENT_STATE_OFF};
@@ -798,6 +803,8 @@ class WiFiComponent : public Component {
   // int8_t limits to 127 APs (enforced in __init__.py via MAX_WIFI_NETWORKS)
   int8_t selected_sta_index_{-1};
   uint8_t roaming_attempts_{0};
+  uint8_t cooldown_failures_{0};
+  uint8_t cooldown_off_attempts_{0};
 #if USE_NETWORK_IPV6
   uint8_t num_ipv6_addresses_{0};
 #endif /* USE_NETWORK_IPV6 */
@@ -847,6 +854,7 @@ class WiFiComponent : public Component {
       false};  // Tracks if we've completed a scan after captive portal started
   bool skip_cooldown_next_cycle_{false};
   bool post_connect_roaming_{true};  // Enabled by default
+  bool cooldown_off_active_{false};
 #if defined(USE_ESP32) && defined(USE_WIFI_RUNTIME_POWER_SAVE)
   bool is_high_performance_mode_{false};
 #endif

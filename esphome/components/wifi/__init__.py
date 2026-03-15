@@ -66,6 +66,8 @@ NO_WIFI_VARIANTS = [const.VARIANT_ESP32H2, const.VARIANT_ESP32P4]
 CONF_SAVE = "save"
 CONF_MIN_AUTH_MODE = "min_auth_mode"
 CONF_POST_CONNECT_ROAMING = "post_connect_roaming"
+CONF_COOLDOWN_OFF_TIME = "cooldown_off_time"
+CONF_COOLDOWN_OFF_ATTEMPTS = "cooldown_off_attempts"
 
 # Maximum number of WiFi networks that can be configured
 # Limited to 127 because selected_sta_index_ is int8_t in C++
@@ -338,6 +340,12 @@ CONFIG_SCHEMA = cv.All(
                 rtl87xx="none",
                 ln882x="light",
             ): cv.enum(WIFI_POWER_SAVE_MODES, upper=True),
+            cv.Optional(
+                CONF_COOLDOWN_OFF_TIME, default="0s"
+            ): cv.positive_time_period_milliseconds,
+            cv.Optional(
+                CONF_COOLDOWN_OFF_ATTEMPTS, default=0
+            ): cv.int_range(min=0, max=255),
             cv.Optional(CONF_FAST_CONNECT, default=False): cv.boolean,
             cv.Optional(CONF_USE_ADDRESS): cv.string_strict,
             cv.Optional(CONF_MIN_AUTH_MODE): cv.All(
@@ -485,6 +493,8 @@ async def to_code(config):
 
     cg.add(var.set_reboot_timeout(config[CONF_REBOOT_TIMEOUT]))
     cg.add(var.set_power_save_mode(config[CONF_POWER_SAVE_MODE]))
+    cg.add(var.set_cooldown_off_time(config[CONF_COOLDOWN_OFF_TIME]))
+    cg.add(var.set_cooldown_off_attempts(config[CONF_COOLDOWN_OFF_ATTEMPTS]))
     if CONF_MIN_AUTH_MODE in config:
         cg.add(var.set_min_auth_mode(config[CONF_MIN_AUTH_MODE]))
     if config[CONF_FAST_CONNECT]:
