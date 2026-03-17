@@ -9,6 +9,7 @@ from esphome.components.const import (
     CONF_BYTE_ORDER,
     CONF_COLOR_DEPTH,
     CONF_DRAW_ROUNDING,
+    CONF_USE_PSRAM,
 )
 from esphome.components.display import CONF_SHOW_TEST_CARD, DISPLAY_ROTATIONS
 from esphome.components.mipi import (
@@ -214,6 +215,11 @@ def model_schema(config):
                     cv.percentage, cv.Range(0.12, 1.0)
                 ),
                 cv.Optional(CONF_USE_DMA, default=False): cv.boolean,
+                cv.Optional(CONF_USE_PSRAM, default=False): cv.All(
+                    cv.only_on_esp32,
+                    cv.requires_component(PSRAM_DOMAIN),
+                    cv.boolean,
+                ),
                 cv.Optional(CONF_DOUBLE_BUFFER, default=False): cv.boolean,
             }
         )
@@ -448,6 +454,8 @@ async def to_code(config):
         cg.add(var.set_writer(lambda_))
     if CONF_USE_DMA in config:
         cg.add(var.set_use_dma(config[CONF_USE_DMA]))
+    if CONF_USE_PSRAM in config:
+        cg.add(var.set_use_psram(config[CONF_USE_PSRAM]))
     if CONF_DOUBLE_BUFFER in config:
         cg.add(var.set_double_buffer(config[CONF_DOUBLE_BUFFER]))
     await display.register_display(var, config)

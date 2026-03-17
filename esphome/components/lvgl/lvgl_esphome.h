@@ -151,7 +151,8 @@ class LvglComponent : public PollingComponent {
 
  public:
   LvglComponent(std::vector<display::Display *> displays, float buffer_frac, bool full_refresh, int draw_rounding,
-                bool resume_on_input, bool update_when_display_idle, bool use_dma, bool double_buffer);
+                bool resume_on_input, bool update_when_display_idle, bool use_dma, bool use_psram,
+                bool double_buffer);
   static void static_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
 
   float get_setup_priority() const override { return setup_priority::PROCESSOR; }
@@ -227,6 +228,7 @@ class LvglComponent : public PollingComponent {
   bool resume_on_input_{};
   bool update_when_display_idle_{};
   bool use_dma_{};
+  bool use_psram_{};
   bool double_buffer_{};
 
   lv_disp_draw_buf_t draw_buf_{};

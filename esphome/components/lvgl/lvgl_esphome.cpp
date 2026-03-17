@@ -5,6 +5,7 @@
 #include "lvgl_hal.h"
 #include "lvgl_esphome.h"
 
+#include <cstdlib>
 #include <numeric>
 
 namespace esphome {
@@ -107,9 +108,10 @@ void LvglComponent::dump_config() {
                 "  Rotation: %d\n"
                 "  Draw rounding: %d\n"
                 "  Use DMA: %s\n"
+                "  Use PSRAM: %s\n"
                 "  Double buffer: %s",
                 this->disp_drv_.hor_res, this->disp_drv_.ver_res, 100 / this->buffer_frac_, this->rotation,
-                (int) this->draw_rounding, YESNO(this->use_dma_), YESNO(this->double_buffer_));
+                (int) this->draw_rounding, YESNO(this->use_dma_), YESNO(this->use_psram_), YESNO(this->double_buffer_));
 }
 
 void LvglComponent::set_paused(bool paused, bool show_snow) {
@@ -477,7 +479,7 @@ void LvglComponent::write_random_() {
  */
 LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buffer_frac, bool full_refresh,
                              int draw_rounding, bool resume_on_input, bool update_when_display_idle, bool use_dma,
-                             bool double_buffer)
+                             bool use_psram, bool double_buffer)
     : draw_rounding(draw_rounding),
       displays_(std::move(displays)),
       buffer_frac_(buffer_frac),
@@ -485,6 +487,7 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
       resume_on_input_(resume_on_input),
       update_when_display_idle_(update_when_display_idle),
       use_dma_(use_dma),
+      use_psram_(use_psram),
       double_buffer_(double_buffer) {
   lv_disp_draw_buf_init(&this->draw_buf_, nullptr, nullptr, 0);
   lv_disp_drv_init(&this->disp_drv_);
@@ -498,9 +501,21 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
 
 void *LvglComponent::allocate_draw_buffer_(size_t size) {
 #ifdef USE_ESP32
+  if (this->use_psram_) {
+    uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    if (this->use_dma_)
+      caps |= MALLOC_CAP_DMA;
+    void *ptr = heap_caps_malloc(size, caps);
+    if (ptr != nullptr) {
+      ESP_LOGV(TAG, "Allocated %s draw buffer %zu bytes at %p", this->use_dma_ ? "PSRAM DMA" : "PSRAM", size, ptr);
+      return ptr;
+    }
+    ESP_LOGE(TAG, "%s draw buffer allocation failed (%zu bytes), aborting", this->use_dma_ ? "PSRAM DMA" : "PSRAM",
+             size);
+    abort();
+  }
   if (this->use_dma_) {
-    void *ptr =
-        heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    void *ptr = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (ptr != nullptr) {
       ESP_LOGV(TAG, "Allocated DMA-capable draw buffer %zu bytes at %p", size, ptr);
       return ptr;

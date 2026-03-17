@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <utility>
 
 #include "esphome/components/spi/spi.h"
@@ -138,6 +139,7 @@ class MipiSpi : public display::Display,
   void set_enable_pins(std::vector<GPIOPin *> enable_pins) { this->enable_pins_ = std::move(enable_pins); }
   void set_dc_pin(GPIOPin *dc_pin) { this->dc_pin_ = dc_pin; }
   void set_use_dma(bool use_dma) { this->use_dma_ = use_dma; }
+  void set_use_psram(bool use_psram) { this->use_psram_ = use_psram; }
   void set_double_buffer(bool double_buffer) { this->double_buffer_ = double_buffer; }
   void set_invert_colors(bool invert_colors) {
     this->invert_colors_ = invert_colors;
@@ -461,6 +463,7 @@ class MipiSpi : public display::Display,
   std::vector<uint8_t> init_sequence_{};
   uint8_t madctl_{};
   bool use_dma_{false};
+  bool use_psram_{false};
   bool double_buffer_{false};
   bool async_in_progress_{false};
 };
@@ -504,10 +507,11 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
                     "  Buffer bytes: %zu\n"
                     "  Draw rounding: %u\n"
                     "  Use DMA: %s\n"
+                    "  Use PSRAM: %s\n"
                     "  Double buffer: %s",
                     this->rotation_, BUFFERPIXEL * 8, FRACTION,
                     sizeof(BUFFERTYPE) * BUFFER_WIDTH * BUFFER_HEIGHT / FRACTION, ROUNDING, YESNO(this->use_dma_),
-                    YESNO(this->double_buffer_));
+                    YESNO(this->use_psram_), YESNO(this->double_buffer_));
   }
 
   void setup() override {
@@ -673,6 +677,17 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
 
   BUFFERTYPE *allocate_buffer_(size_t count) {
 #ifdef USE_ESP32
+    if (this->use_psram_) {
+      uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+      if (this->use_dma_)
+        caps |= MALLOC_CAP_DMA;
+      auto *ptr = static_cast<BUFFERTYPE *>(heap_caps_malloc(count * sizeof(BUFFERTYPE), caps));
+      if (ptr != nullptr) {
+        return ptr;
+      }
+      esph_log_e(TAG, "%s buffer allocation failed, aborting", this->use_dma_ ? "PSRAM DMA" : "PSRAM");
+      abort();
+    }
     if (this->use_dma_) {
       auto *ptr = static_cast<BUFFERTYPE *>(heap_caps_malloc(
           count * sizeof(BUFFERTYPE), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
@@ -680,6 +695,14 @@ class MipiSpiBuffer : public MipiSpi<BUFFERTYPE, BUFFERPIXEL, IS_BIG_ENDIAN, DIS
         return ptr;
       }
       esph_log_w(TAG, "DMA-capable buffer allocation failed, falling back");
+    }
+    if (this->use_psram_) {
+      auto *ptr = static_cast<BUFFERTYPE *>(
+          heap_caps_malloc(count * sizeof(BUFFERTYPE), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+      if (ptr != nullptr) {
+        return ptr;
+      }
+      esph_log_w(TAG, "PSRAM buffer allocation failed, falling back");
     }
 #endif
     RAMAllocator<BUFFERTYPE> allocator{};

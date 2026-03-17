@@ -5,7 +5,11 @@ import pkgutil
 
 from esphome.automation import build_automation, validate_automation
 import esphome.codegen as cg
-from esphome.components.const import CONF_COLOR_DEPTH, CONF_DRAW_ROUNDING
+from esphome.components.const import (
+    CONF_COLOR_DEPTH,
+    CONF_DRAW_ROUNDING,
+    CONF_USE_PSRAM,
+)
 from esphome.components.display import Display
 from esphome.components.psram import DOMAIN as PSRAM_DOMAIN
 import esphome.config_validation as cv
@@ -305,6 +309,7 @@ async def to_code(configs):
             config[df.CONF_RESUME_ON_INPUT],
             config[df.CONF_UPDATE_WHEN_DISPLAY_IDLE],
             config[CONF_USE_DMA],
+            config[CONF_USE_PSRAM],
             config[CONF_DOUBLE_BUFFER],
         )
         await cg.register_component(lv_component, config)
@@ -410,6 +415,11 @@ LVGL_SCHEMA = cv.All(
                 cv.Optional(CONF_DRAW_ROUNDING, default=2): cv.positive_int,
                 cv.Optional(CONF_BUFFER_SIZE, default=0): cv.percentage,
                 cv.Optional(CONF_USE_DMA, default=False): cv.boolean,
+                cv.Optional(CONF_USE_PSRAM, default=False): cv.All(
+                    cv.only_on_esp32,
+                    cv.requires_component(PSRAM_DOMAIN),
+                    cv.boolean,
+                ),
                 cv.Optional(CONF_DOUBLE_BUFFER, default=False): cv.boolean,
                 cv.Optional(CONF_LOG_LEVEL, default="WARN"): cv.one_of(
                     *df.LV_LOG_LEVELS, upper=True
