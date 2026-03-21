@@ -1070,8 +1070,6 @@ void WiFiComponent::save_wifi_sta(const char *ssid, const char *password) {
   strncpy(save.ssid, ssid, sizeof(save.ssid) - 1);              // max 32 chars, byte 32 remains \0
   strncpy(save.password, password, sizeof(save.password) - 1);  // max 64 chars, byte 64 remains \0
   this->pref_.save(&save);
-  // ensure it's written immediately
-  global_preferences->sync();
 
   WiFiAP sta{};
   sta.set_ssid(ssid);
@@ -1112,7 +1110,6 @@ void WiFiComponent::delete_wifi_stas(const char *ssid) {
   }
   if (modified) {
     this->saved_stas_pref_.save(&array);
-    global_preferences->sync();
     // If the currently active STA was deleted, clear it from memory and trigger reconnect
     const WiFiAP *current_sta = this->get_selected_sta_();
     if (current_sta != nullptr && current_sta->ssid_ == ssid) {
@@ -1179,7 +1176,6 @@ void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
     ESP_LOGE(TAG, "Failed to save WiFi STA to flash");
     return;
   }
-  global_preferences->sync();
 
   // 同时添加到当前sta_列表以便立即使用
   WiFiAP ap{};
