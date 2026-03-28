@@ -415,10 +415,7 @@ LVGL_SCHEMA = cv.All(
                 cv.Optional(CONF_DRAW_ROUNDING, default=2): cv.positive_int,
                 cv.Optional(CONF_BUFFER_SIZE, default=0): cv.percentage,
                 cv.Optional(CONF_USE_DMA, default=False): cv.boolean,
-                cv.Optional(CONF_USE_PSRAM, default=False): cv.All(
-                    cv.requires_component(PSRAM_DOMAIN),
-                    cv.boolean,
-                ),
+                cv.Optional(CONF_USE_PSRAM, default=False): cv.boolean,
                 cv.Optional(CONF_DOUBLE_BUFFER, default=False): cv.boolean,
                 cv.Optional(CONF_LOG_LEVEL, default="WARN"): cv.one_of(
                     *df.LV_LOG_LEVELS, upper=True
