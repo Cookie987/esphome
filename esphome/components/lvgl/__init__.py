@@ -416,7 +416,6 @@ LVGL_SCHEMA = cv.All(
                 cv.Optional(CONF_BUFFER_SIZE, default=0): cv.percentage,
                 cv.Optional(CONF_USE_DMA, default=False): cv.boolean,
                 cv.Optional(CONF_USE_PSRAM, default=False): cv.All(
-                    cv.only_on_esp32,
                     cv.requires_component(PSRAM_DOMAIN),
                     cv.boolean,
                 ),
