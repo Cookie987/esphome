@@ -3,6 +3,7 @@
 #include <list>
 #include <memory>
 #include <set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -574,6 +575,66 @@ template<typename... Ts> class HttpRequestSendAction : public Action<Ts...> {
   Trigger<Ts...> error_trigger_;
 
   size_t max_response_buffer_size_{SIZE_MAX};
+};
+
+template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSendAction<Ts...>, public Component {
+ public:
+  explicit HttpRequestSendAsyncAction(HttpRequestComponent *parent) : HttpRequestSendAction<Ts...>(parent) {}
+
+  void setup() override {
+    // Start with loop disabled - only enable when pending requests exist.
+    if (this->num_running_ == 0) {
+      this->disable_loop();
+    }
+  }
+
+  void play_complex(const Ts &...x) override {
+    this->num_running_++;
+    this->pending_requests_.emplace_back(x...);
+
+    // Continue automation immediately; actual HTTP request runs in loop().
+    this->play_next_(x...);
+    this->enable_loop();
+  }
+
+  bool is_running() override {
+    return !this->pending_requests_.empty() || this->is_running_next_();
+  }
+
+  void stop_complex() override {
+    this->pending_requests_.clear();
+    this->disable_loop();
+    this->num_running_ = 0;
+    this->stop_next_();
+  }
+
+  void loop() override {
+    if (this->pending_requests_.empty()) {
+      this->disable_loop();
+      return;
+    }
+
+    auto params = std::move(this->pending_requests_.front());
+    this->pending_requests_.pop_front();
+    this->play_from_tuple_(params, std::make_index_sequence<sizeof...(Ts)>{});
+
+    if (this->pending_requests_.empty()) {
+      this->disable_loop();
+    }
+  }
+
+  void stop() override {
+    this->pending_requests_.clear();
+    this->disable_loop();
+  }
+
+ protected:
+  template<size_t... S>
+  void play_from_tuple_(const std::tuple<Ts...> &tuple, std::index_sequence<S...> /*unused*/) {
+    this->HttpRequestSendAction<Ts...>::play(std::get<S>(tuple)...);
+  }
+
+  std::list<std::tuple<Ts...>> pending_requests_;
 };
 
 }  // namespace esphome::http_request

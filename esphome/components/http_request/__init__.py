@@ -35,6 +35,9 @@ HttpContainer = http_request_ns.class_("HttpContainer")
 HttpRequestSendAction = http_request_ns.class_(
     "HttpRequestSendAction", automation.Action
 )
+HttpRequestSendAsyncAction = http_request_ns.class_(
+    "HttpRequestSendAsyncAction", automation.Action, cg.Component
+)
 HttpRequestResponseTrigger = http_request_ns.class_(
     "HttpRequestResponseTrigger",
     automation.Trigger.template(
@@ -356,6 +359,18 @@ async def http_request_action_to_code(config, action_id, template_arg, args):
     if error_conf := config.get(CONF_ON_ERROR):
         await automation.build_automation(var.get_error_trigger(), args, error_conf)
 
+    return var
+
+
+@automation.register_action(
+    "http_request.send_async",
+    HttpRequestSendAsyncAction,
+    HTTP_REQUEST_SEND_ACTION_SCHEMA,
+    synchronous=False,
+)
+async def http_request_send_async_action_to_code(config, action_id, template_arg, args):
+    var = await http_request_action_to_code(config, action_id, template_arg, args)
+    await cg.register_component(var, {})
     return var
 
 
