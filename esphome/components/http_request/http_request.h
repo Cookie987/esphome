@@ -14,6 +14,10 @@
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#ifdef USE_ESP32
+#include "esphome/core/static_task.h"
+#include <atomic>
+#endif
 
 namespace esphome::http_request {
 
@@ -582,7 +586,7 @@ template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSe
   explicit HttpRequestSendAsyncAction(HttpRequestComponent *parent) : HttpRequestSendAction<Ts...>(parent) {}
 
   void setup() override {
-    // Start with loop disabled - only enable when pending requests exist.
+    // Start with loop disabled - only enable when requests are pending/running.
     if (this->num_running_ == 0) {
       this->disable_loop();
     }
@@ -590,51 +594,245 @@ template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSe
 
   void play_complex(const Ts &...x) override {
     this->num_running_++;
-    this->pending_requests_.emplace_back(x...);
-
-    // Continue automation immediately; actual HTTP request runs in loop().
-    this->play_next_(x...);
+    RequestJob request;
+    request.args = std::make_tuple(x...);
+    this->prepare_request_(request, x...);
+    this->pending_requests_.push_back(std::move(request));
     this->enable_loop();
   }
 
   bool is_running() override {
-    return !this->pending_requests_.empty() || this->is_running_next_();
+    return this->active_request_ != nullptr || !this->pending_requests_.empty() || this->is_running_next_();
   }
 
   void stop_complex() override {
     this->pending_requests_.clear();
-    this->disable_loop();
     this->num_running_ = 0;
+#ifdef USE_ESP32
+    // Active request cannot be safely canceled while HTTP I/O is in progress.
+    // Mark it so completion is ignored when the worker returns.
+    this->ignore_active_result_ = true;
+#endif
     this->stop_next_();
+    if (this->active_request_ == nullptr) {
+      this->disable_loop();
+    }
   }
 
   void loop() override {
-    if (this->pending_requests_.empty()) {
+#ifdef USE_ESP32
+    this->process_completed_request_();
+#endif
+
+    if (this->active_request_ == nullptr && !this->pending_requests_.empty()) {
+      this->start_next_request_();
+    }
+
+#ifndef USE_ESP32
+    if (this->active_request_ != nullptr) {
+      // Non-ESP32 fallback: still processes one request at a time, but blocking.
+      this->execute_active_request_();
+      auto finished_request = std::move(this->active_request_);
+      this->finish_request_(std::move(finished_request), false, false);
+    }
+#endif
+
+    if (this->active_request_ == nullptr && this->pending_requests_.empty()) {
       this->disable_loop();
+    }
+  }
+
+#ifdef USE_ESP32
+  ~HttpRequestSendAsyncAction() override { this->worker_task_.deallocate(); }
+#endif
+
+ protected:
+  struct RequestJob {
+    std::tuple<Ts...> args;
+    std::string url;
+    std::string method;
+    std::string body;
+    std::vector<Header> request_headers;
+    std::vector<std::string> lower_case_collect_headers;
+#ifdef USE_HTTP_REQUEST_RESPONSE
+    bool capture_response{false};
+    std::string response_body;
+#endif
+    size_t max_response_buffer_size{SIZE_MAX};
+    std::shared_ptr<HttpContainer> container{nullptr};
+  };
+
+  void prepare_request_(RequestJob &request, const Ts &...x) {
+    if (this->body_.has_value()) {
+      request.body = this->body_.value(x...);
+    }
+    if (!this->json_.empty()) {
+      auto f = std::bind(&HttpRequestSendAction<Ts...>::encode_json_, this, x..., std::placeholders::_1);
+      request.body = json::build_json(f);
+    }
+    if (this->json_func_ != nullptr) {
+      auto f = std::bind(&HttpRequestSendAction<Ts...>::encode_json_func_, this, x..., std::placeholders::_1);
+      request.body = json::build_json(f);
+    }
+
+    request.url = this->url_.value(x...);
+    request.method = this->method_.value(x...);
+    request.max_response_buffer_size = this->max_response_buffer_size_;
+    request.lower_case_collect_headers = this->lower_case_collect_headers_;
+#ifdef USE_HTTP_REQUEST_RESPONSE
+    request.capture_response = this->capture_response_.value(x...);
+#endif
+
+    request.request_headers.reserve(this->request_headers_.size());
+    for (const auto &[key, val] : this->request_headers_) {
+      request.request_headers.push_back({key, val.value(x...)});
+    }
+  }
+
+  void start_next_request_() {
+    this->active_request_ = std::make_unique<RequestJob>(std::move(this->pending_requests_.front()));
+    this->pending_requests_.pop_front();
+
+#ifdef USE_ESP32
+    this->active_request_done_.store(false, std::memory_order_release);
+    this->ignore_active_result_ = false;
+
+    if (!this->worker_task_.create(&HttpRequestSendAsyncAction<Ts...>::worker_task_, "http_req_async",
+                                   ASYNC_TASK_STACK_SIZE, this, ASYNC_TASK_PRIORITY, false)) {
+      ESP_LOGE("http_request.async", "Failed to create async worker task");
+      this->status_momentary_error("task_create", 1000);
+      auto failed_request = std::move(this->active_request_);
+      this->finish_request_(std::move(failed_request), false, true);
+    }
+#endif
+  }
+
+  void execute_active_request_() {
+    if (this->active_request_ == nullptr) {
       return;
     }
 
-    auto params = std::move(this->pending_requests_.front());
-    this->pending_requests_.pop_front();
-    this->play_from_tuple_(params, std::make_index_sequence<sizeof...(Ts)>{});
+    auto &request = *this->active_request_;
+    request.container = this->parent_->start(
+        request.url, request.method, request.body, request.request_headers, request.lower_case_collect_headers);
+    if (request.container == nullptr) {
+      return;
+    }
 
-    if (this->pending_requests_.empty()) {
-      this->disable_loop();
+#ifdef USE_HTTP_REQUEST_RESPONSE
+    if (request.capture_response) {
+      this->read_response_body_(request);
+    }
+#endif
+
+    request.container->end();
+  }
+
+#ifdef USE_HTTP_REQUEST_RESPONSE
+  void read_response_body_(RequestJob &request) {
+    const size_t max_length = request.max_response_buffer_size;
+    RAMAllocator<uint8_t> allocator;
+    uint8_t *buf = allocator.allocate(max_length);
+    if (buf == nullptr) {
+      return;
+    }
+
+    size_t read_index = 0;
+    uint32_t last_data_time = millis();
+    const uint32_t read_timeout = this->parent_->get_timeout();
+    while (request.container->get_bytes_read() < max_length) {
+      int read_or_error =
+          request.container->read(buf + read_index, std::min<size_t>(max_length - read_index, static_cast<size_t>(512)));
+      App.feed_wdt();
+      yield();
+      auto result =
+          http_read_loop_result(read_or_error, last_data_time, read_timeout, request.container->is_read_complete());
+      if (result == HttpReadLoopResult::RETRY)
+        continue;
+      if (result != HttpReadLoopResult::DATA)
+        break;  // COMPLETE, ERROR, or TIMEOUT
+      read_index += read_or_error;
+    }
+
+    request.response_body.reserve(read_index);
+    request.response_body.assign(reinterpret_cast<char *>(buf), read_index);
+    allocator.deallocate(buf, max_length);
+  }
+#endif
+
+  void finish_request_(std::unique_ptr<RequestJob> request, bool ignore_result, bool force_error) {
+    if (request == nullptr) {
+      return;
+    }
+
+    if (!ignore_result) {
+      if (force_error || request->container == nullptr) {
+        std::apply([this](Ts... captured_args_inner) { this->error_trigger_.trigger(captured_args_inner...); },
+                   request->args);
+      } else {
+#ifdef USE_HTTP_REQUEST_RESPONSE
+        if (request->capture_response) {
+          std::apply(
+              [this, &request](Ts... captured_args_inner) {
+                this->success_trigger_with_response_.trigger(request->container, request->response_body,
+                                                             captured_args_inner...);
+              },
+              request->args);
+        } else
+#endif
+        {
+          std::apply(
+              [this, &request](Ts... captured_args_inner) {
+                this->success_trigger_.trigger(request->container, captured_args_inner...);
+              },
+              request->args);
+        }
+        this->play_next_tuple_(request->args);
+      }
+    }
+
+    // Keep action chain behavior consistent with synchronous actions:
+    // always continue to next action after completion, even on error.
+    if (!ignore_result && (force_error || request->container == nullptr)) {
+      this->play_next_tuple_(request->args);
     }
   }
 
-  void stop() override {
-    this->pending_requests_.clear();
-    this->disable_loop();
+#ifdef USE_ESP32
+  static void worker_task_(void *params) {
+    auto *self = static_cast<HttpRequestSendAsyncAction<Ts...> *>(params);
+    self->execute_active_request_();
+    self->active_request_done_.store(true, std::memory_order_release);
+    self->enable_loop_soon_any_context();
+    vTaskSuspend(nullptr);
   }
 
- protected:
-  template<size_t... S>
-  void play_from_tuple_(const std::tuple<Ts...> &tuple, std::index_sequence<S...> /*unused*/) {
-    this->HttpRequestSendAction<Ts...>::play(std::get<S>(tuple)...);
-  }
+  void process_completed_request_() {
+    if (this->active_request_ == nullptr) {
+      return;
+    }
+    if (!this->active_request_done_.load(std::memory_order_acquire)) {
+      return;
+    }
 
-  std::list<std::tuple<Ts...>> pending_requests_;
+    this->worker_task_.deallocate();
+    auto finished_request = std::move(this->active_request_);
+    const bool ignore = this->ignore_active_result_;
+    this->ignore_active_result_ = false;
+    this->active_request_done_.store(false, std::memory_order_release);
+    this->finish_request_(std::move(finished_request), ignore, false);
+  }
+#endif
+
+#ifdef USE_ESP32
+  static constexpr uint32_t ASYNC_TASK_STACK_SIZE = 4096;
+  static constexpr UBaseType_t ASYNC_TASK_PRIORITY = 1;
+  StaticTask worker_task_{};
+  std::atomic<bool> active_request_done_{false};
+  bool ignore_active_result_{false};
+#endif
+  std::list<RequestJob> pending_requests_;
+  std::unique_ptr<RequestJob> active_request_{nullptr};
 };
 
 }  // namespace esphome::http_request

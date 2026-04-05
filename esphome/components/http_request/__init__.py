@@ -279,6 +279,10 @@ HTTP_REQUEST_SEND_ACTION_SCHEMA = HTTP_REQUEST_ACTION_SCHEMA.extend(
         ),
     }
 )
+HTTP_REQUEST_SEND_ASYNC_ACTION_SCHEMA = cv.All(
+    cv.only_on_esp32,
+    HTTP_REQUEST_SEND_ACTION_SCHEMA,
+)
 
 
 @automation.register_action(
@@ -365,7 +369,7 @@ async def http_request_action_to_code(config, action_id, template_arg, args):
 @automation.register_action(
     "http_request.send_async",
     HttpRequestSendAsyncAction,
-    HTTP_REQUEST_SEND_ACTION_SCHEMA,
+    HTTP_REQUEST_SEND_ASYNC_ACTION_SCHEMA,
     synchronous=False,
 )
 async def http_request_send_async_action_to_code(config, action_id, template_arg, args):
