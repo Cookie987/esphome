@@ -128,7 +128,7 @@ def generate_lv_conf_h():
     definitions.append("#define LV_FS_POSIX_LETTER 'A'")
     definitions.append("#define LV_LABEL_LONG_TXT_HINT 1")
     definitions.append("#define LV_USE_TINY_TTF 1")
-    definitions.append("LV_TINY_TTF_FILE_SUPPORT 1")
+    definitions.append("#define LV_TINY_TTF_FILE_SUPPORT 1")
     definitions.sort()
     return LV_CONF_H_FORMAT.format("\n".join(definitions))
 
