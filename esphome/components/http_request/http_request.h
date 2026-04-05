@@ -643,7 +643,7 @@ template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSe
   }
 
 #ifdef USE_ESP32
-  ~HttpRequestSendAsyncAction() override { this->worker_task_.deallocate(); }
+  ~HttpRequestSendAsyncAction() { this->worker_task_.deallocate(); }
 #endif
 
  protected:
@@ -663,15 +663,30 @@ template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSe
   };
 
   void prepare_request_(RequestJob &request, const Ts &...x) {
+    auto captured_args = std::make_tuple(x...);
+
     if (this->body_.has_value()) {
       request.body = this->body_.value(x...);
     }
     if (!this->json_.empty()) {
-      auto f = std::bind(&HttpRequestSendAction<Ts...>::encode_json_, this, x..., std::placeholders::_1);
+      auto f = [this, captured_args](JsonObject root) {
+        std::apply(
+            [this, &root](Ts... captured_args_inner) {
+              for (const auto &item : this->json_) {
+                auto val = item.second;
+                root[item.first] = val.value(captured_args_inner...);
+              }
+            },
+            captured_args);
+      };
       request.body = json::build_json(f);
     }
     if (this->json_func_ != nullptr) {
-      auto f = std::bind(&HttpRequestSendAction<Ts...>::encode_json_func_, this, x..., std::placeholders::_1);
+      auto f = [this, captured_args](JsonObject root) {
+        std::apply(
+            [this, &root](Ts... captured_args_inner) { this->json_func_(captured_args_inner..., root); },
+            captured_args);
+      };
       request.body = json::build_json(f);
     }
 
@@ -697,7 +712,7 @@ template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSe
     this->active_request_done_.store(false, std::memory_order_release);
     this->ignore_active_result_ = false;
 
-    if (!this->worker_task_.create(&HttpRequestSendAsyncAction<Ts...>::worker_task_, "http_req_async",
+    if (!this->worker_task_.create(&HttpRequestSendAsyncAction<Ts...>::worker_task_entry_, "http_req_async",
                                    ASYNC_TASK_STACK_SIZE, this, ASYNC_TASK_PRIORITY, false)) {
       ESP_LOGE("http_request.async", "Failed to create async worker task");
       this->status_momentary_error("task_create", 1000);
@@ -799,7 +814,7 @@ template<typename... Ts> class HttpRequestSendAsyncAction : public HttpRequestSe
   }
 
 #ifdef USE_ESP32
-  static void worker_task_(void *params) {
+  static void worker_task_entry_(void *params) {
     auto *self = static_cast<HttpRequestSendAsyncAction<Ts...> *>(params);
     self->execute_active_request_();
     self->active_request_done_.store(true, std::memory_order_release);

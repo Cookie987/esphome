@@ -11,6 +11,29 @@
 namespace esphome {
 namespace ota {
 
+namespace {
+
+class ScopedCurrentTaskWDTGuard {
+ public:
+  ScopedCurrentTaskWDTGuard() {
+    this->was_registered_ = esp_task_wdt_status(nullptr) == ESP_OK;
+    if (this->was_registered_) {
+      esp_task_wdt_delete(nullptr);
+    }
+  }
+
+  ~ScopedCurrentTaskWDTGuard() {
+    if (this->was_registered_) {
+      esp_task_wdt_add(nullptr);
+    }
+  }
+
+ protected:
+  bool was_registered_{false};
+};
+
+}  // namespace
+
 std::unique_ptr<IDFOTABackend> make_ota_backend() { return make_unique<IDFOTABackend>(); }
 
 OTAResponseTypes IDFOTABackend::begin(size_t image_size) {
@@ -41,6 +64,9 @@ OTAResponseTypes IDFOTABackend::begin(size_t image_size) {
   esp_task_wdt_reconfigure(&wdtc);
 #endif
 
+  // esp_ota_begin() may spend several seconds erasing the target partition.
+  // During that time the loop task cannot feed the task watchdog.
+  ScopedCurrentTaskWDTGuard current_task_wdt_guard;
   esp_err_t err = esp_ota_begin(this->partition_, image_size, &this->update_handle_);
 
 #if CONFIG_ESP_TASK_WDT_TIMEOUT_S < 15
