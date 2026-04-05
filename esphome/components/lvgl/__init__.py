@@ -130,6 +130,7 @@ def generate_lv_conf_h():
     definitions.append("#define LV_USE_TINY_TTF 1")
     definitions.append("#define LV_TINY_TTF_FILE_SUPPORT 1")
     definitions.append("#define LV_USE_FONT_COMPRESSED 1")
+    definitions.append("#define LV_USE_FONT_SUBPX 1")
     definitions.sort()
     return LV_CONF_H_FORMAT.format("\n".join(definitions))
 
