@@ -1,0 +1,34 @@
+wifi:
+  ssid: MySSID
+  password: password1
+
+logger:
+
+websocket_client:
+  id: ws_client
+  url: ws://example.com/ws
+  reconnect_interval: 10s
+  on_connect:
+    then:
+      - websocket_client.send: "hello from esphome"
+  on_disconnect:
+    then:
+      - logger.log: "websocket disconnected"
+  on_message:
+    then:
+      - logger.log:
+          format: "websocket message: %s"
+          args: ["message.c_str()"]
+
+interval:
+  - interval: 1min
+    then:
+      - if:
+          condition:
+            websocket_client.connected:
+              id: ws_client
+          then:
+            - websocket_client.send:
+                id: ws_client
+                message: !lambda |-
+                  return std::string("tick-") + App.get_name();

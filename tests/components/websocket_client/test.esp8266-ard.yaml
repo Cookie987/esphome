@@ -1,0 +1,31 @@
+wifi:
+  ssid: MySSID
+  password: password1
+
+logger:
+
+websocket_client:
+  id: ws_client
+  url: ws://echo.websocket.org
+  auto_connect: false
+  reconnect_interval: 15s
+  on_connect:
+    then:
+      - logger.log: "websocket connected"
+  on_disconnect:
+    then:
+      - logger.log: "websocket disconnected"
+  on_message:
+    then:
+      - logger.log:
+          format: "websocket message: %s"
+          args: ["message.c_str()"]
+
+interval:
+  - interval: 30s
+    then:
+      - websocket_client.connect:
+          id: ws_client
+      - websocket_client.send:
+          id: ws_client
+          message: "ping"
