@@ -75,7 +75,7 @@ struct SavedWifiFastConnectSettings {
 } PACKED;  // NOLINT
 
 struct SavedWifiSettingsArray {
-  static constexpr uint8_t MAX_SAVED = 10;
+  static constexpr uint8_t MAX_SAVED = 16;
   uint8_t count;
   SavedWifiSettings entries[MAX_SAVED];
 } PACKED;  // NOLINT
@@ -713,6 +713,11 @@ class WiFiComponent : public Component {
   bool load_fast_connect_settings_(WiFiAP &params);
   void save_fast_connect_settings_();
 #endif
+
+  bool sanitize_saved_wifi_array_(SavedWifiSettingsArray &array);
+  int8_t find_saved_wifi_index_(const SavedWifiSettingsArray &array, const char *ssid) const;
+  void rebuild_sta_from_saved_wifi_array_(const SavedWifiSettingsArray &array, const char *preferred_ssid = nullptr);
+  void sync_legacy_saved_wifi_pref_(const SavedWifiSettingsArray &array);
 
   // Post-connect roaming methods
   void check_roaming_(uint32_t now);

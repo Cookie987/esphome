@@ -641,26 +641,32 @@ void WiFiComponent::start() {
 
   // Load saved WiFi STAs from array preference
   SavedWifiSettingsArray saved_array{};
-  if (this->saved_stas_pref_.load(&saved_array) && saved_array.count > 0) {
-    ESP_LOGD(TAG, "Loaded %d saved WiFi STAs", saved_array.count);
-    this->clear_sta();
-    for (uint8_t i = 0; i < saved_array.count; i++) {
-      const SavedWifiSettings &save = saved_array.entries[i];
-      WiFiAP sta{};
-      sta.set_ssid(save.ssid);
-      sta.set_password(save.password);
-      this->add_sta(sta);
-      ESP_LOGD(TAG, "  [%d] SSID: %s", i, save.ssid);
+  bool has_saved_array = this->saved_stas_pref_.load(&saved_array);
+  if (has_saved_array) {
+    bool sanitized = this->sanitize_saved_wifi_array_(saved_array);
+    if (sanitized) {
+      this->saved_stas_pref_.save(&saved_array);
+    }
+    if (saved_array.count > 0) {
+      ESP_LOGD(TAG, "Loaded %d saved WiFi STAs", saved_array.count);
+      this->rebuild_sta_from_saved_wifi_array_(saved_array);
+      for (uint8_t i = 0; i < saved_array.count; i++) {
+        ESP_LOGD(TAG, "  [%d] SSID: %s", i, saved_array.entries[i].ssid);
+      }
+    } else {
+      ESP_LOGD(TAG, "Loaded empty saved WiFi STA list");
     }
   } else {
     // Fallback to single saved WiFi STA for backward compatibility
     SavedWifiSettings save{};
-    if (this->pref_.load(&save)) {
+    if (this->pref_.load(&save) && save.ssid[0] != '\0') {
       ESP_LOGD(TAG, "Loaded single saved WiFi STA: %s", save.ssid);
-      WiFiAP sta{};
-      sta.set_ssid(save.ssid);
-      sta.set_password(save.password);
-      this->set_sta(sta);
+      saved_array.count = 1;
+      strncpy(saved_array.entries[0].ssid, save.ssid, sizeof(saved_array.entries[0].ssid) - 1);
+      strncpy(saved_array.entries[0].password, save.password, sizeof(saved_array.entries[0].password) - 1);
+      this->sanitize_saved_wifi_array_(saved_array);
+      this->saved_stas_pref_.save(&saved_array);
+      this->rebuild_sta_from_saved_wifi_array_(saved_array);
     }
   }
 
@@ -819,6 +825,12 @@ void WiFiComponent::loop() {
             if (this->roaming_state_ == RoamingState::SCANNING) {
               if (this->scan_done_) {
                 this->process_roaming_scan_();
+              } else if (now - this->action_started_ > WIFI_SCAN_TIMEOUT_MS) {
+                ESP_LOGW(TAG, "Roam scan timeout");
+                this->roaming_state_ = RoamingState::IDLE;
+                this->scan_done_ = false;
+                this->scan_result_.clear();
+                this->release_scan_results_();
               }
               // else: scan in progress, wait
             } else if (this->roaming_state_ == RoamingState::IDLE && this->roaming_attempts_ < ROAMING_MAX_ATTEMPTS &&
@@ -993,6 +1005,87 @@ void WiFiComponent::setup_ap_config_() {
   }
 }
 
+bool WiFiComponent::sanitize_saved_wifi_array_(SavedWifiSettingsArray &array) {
+  SavedWifiSettingsArray normalized{};
+  uint8_t input_count = array.count;
+  if (input_count > SavedWifiSettingsArray::MAX_SAVED) {
+    input_count = SavedWifiSettingsArray::MAX_SAVED;
+  }
+
+  bool modified = array.count != input_count;
+  for (uint8_t i = 0; i < input_count; i++) {
+    array.entries[i].ssid[sizeof(array.entries[i].ssid) - 1] = '\0';
+    array.entries[i].password[sizeof(array.entries[i].password) - 1] = '\0';
+
+    if (array.entries[i].ssid[0] == '\0') {
+      modified = true;
+      continue;
+    }
+
+    int8_t existing_index = -1;
+    for (uint8_t j = 0; j < normalized.count; j++) {
+      if (strcmp(normalized.entries[j].ssid, array.entries[i].ssid) == 0) {
+        existing_index = static_cast<int8_t>(j);
+        break;
+      }
+    }
+
+    if (existing_index >= 0) {
+      if (strcmp(normalized.entries[existing_index].password, array.entries[i].password) != 0) {
+        strncpy(normalized.entries[existing_index].password, array.entries[i].password,
+                sizeof(normalized.entries[existing_index].password) - 1);
+        normalized.entries[existing_index].password[sizeof(normalized.entries[existing_index].password) - 1] = '\0';
+      }
+      modified = true;
+      continue;
+    }
+
+    normalized.entries[normalized.count++] = array.entries[i];
+  }
+
+  array = normalized;
+  return modified;
+}
+
+int8_t WiFiComponent::find_saved_wifi_index_(const SavedWifiSettingsArray &array, const char *ssid) const {
+  if (ssid == nullptr || ssid[0] == '\0') {
+    return -1;
+  }
+  for (uint8_t i = 0; i < array.count; i++) {
+    if (strcmp(array.entries[i].ssid, ssid) == 0) {
+      return static_cast<int8_t>(i);
+    }
+  }
+  return -1;
+}
+
+void WiFiComponent::rebuild_sta_from_saved_wifi_array_(const SavedWifiSettingsArray &array, const char *preferred_ssid) {
+  this->clear_sta();
+  if (array.count == 0) {
+    return;
+  }
+
+  this->init_sta(array.count);
+  for (uint8_t i = 0; i < array.count; i++) {
+    WiFiAP sta{};
+    sta.set_ssid(array.entries[i].ssid);
+    sta.set_password(array.entries[i].password);
+    this->add_sta(sta);
+  }
+
+  int8_t preferred_index = this->find_saved_wifi_index_(array, preferred_ssid);
+  this->selected_sta_index_ = preferred_index >= 0 ? preferred_index : 0;
+}
+
+void WiFiComponent::sync_legacy_saved_wifi_pref_(const SavedWifiSettingsArray &array) {
+  SavedWifiSettings legacy{};
+  if (array.count > 0) {
+    strncpy(legacy.ssid, array.entries[0].ssid, sizeof(legacy.ssid) - 1);
+    strncpy(legacy.password, array.entries[0].password, sizeof(legacy.password) - 1);
+  }
+  this->pref_.save(&legacy);
+}
+
 void WiFiComponent::set_ap(const WiFiAP &ap) {
   this->ap_ = ap;
   this->has_ap_ = true;
@@ -1073,15 +1166,42 @@ void WiFiComponent::save_wifi_sta(const std::string &ssid, const std::string &pa
   this->save_wifi_sta(ssid.c_str(), password.c_str());
 }
 void WiFiComponent::save_wifi_sta(const char *ssid, const char *password) {
-  SavedWifiSettings save{};  // zero-initialized - all bytes set to \0, guaranteeing null termination
-  strncpy(save.ssid, ssid, sizeof(save.ssid) - 1);              // max 32 chars, byte 32 remains \0
-  strncpy(save.password, password, sizeof(save.password) - 1);  // max 64 chars, byte 64 remains \0
-  this->pref_.save(&save);
+  if (ssid == nullptr || ssid[0] == '\0') {
+    ESP_LOGW(TAG, "Skipping save_wifi_sta for empty SSID");
+    return;
+  }
+  const char *safe_password = password != nullptr ? password : "";
 
-  WiFiAP sta{};
-  sta.set_ssid(ssid);
-  sta.set_password(password);
-  this->set_sta(sta);
+  SavedWifiSettingsArray array{};
+  this->saved_stas_pref_.load(&array);
+  this->sanitize_saved_wifi_array_(array);
+
+  int8_t existing_index = this->find_saved_wifi_index_(array, ssid);
+  if (existing_index >= 0) {
+    strncpy(array.entries[existing_index].password, safe_password, sizeof(array.entries[existing_index].password) - 1);
+    array.entries[existing_index].password[sizeof(array.entries[existing_index].password) - 1] = '\0';
+  } else {
+    if (array.count >= SavedWifiSettingsArray::MAX_SAVED) {
+      ESP_LOGW(TAG, "Saved WiFi list full, dropping oldest entry " LOG_SECRET("'%s'") " to store " LOG_SECRET("'%s'"),
+               array.entries[0].ssid, ssid);
+      for (uint8_t i = 1; i < array.count; i++) {
+        array.entries[i - 1] = array.entries[i];
+      }
+      array.count--;
+    }
+
+    SavedWifiSettings &entry = array.entries[array.count++];
+    strncpy(entry.ssid, ssid, sizeof(entry.ssid) - 1);
+    entry.ssid[sizeof(entry.ssid) - 1] = '\0';
+    strncpy(entry.password, safe_password, sizeof(entry.password) - 1);
+    entry.password[sizeof(entry.password) - 1] = '\0';
+  }
+
+  this->saved_stas_pref_.save(&array);
+  this->sync_legacy_saved_wifi_pref_(array);
+  this->rebuild_sta_from_saved_wifi_array_(array, ssid);
+  this->skip_cooldown_next_cycle_ = true;
+  global_preferences->sync();
 
   // Trigger connection attempt (exits cooldown if needed, no-op if already connecting/connected)
   this->connect_soon_();
@@ -1091,6 +1211,7 @@ void WiFiComponent::clear_saved_wifi_stas() {
   SavedWifiSettingsArray array{};
   array.count = 0;
   this->saved_stas_pref_.save(&array);
+  this->sync_legacy_saved_wifi_pref_(array);
   global_preferences->sync();
   this->clear_sta();
 }
@@ -1100,9 +1221,15 @@ void WiFiComponent::delete_wifi_stas(const std::string &ssid) {
 }
 
 void WiFiComponent::delete_wifi_stas(const char *ssid) { 
+  if (ssid == nullptr || ssid[0] == '\0') {
+    ESP_LOGW(TAG, "Skipping delete_wifi_stas for empty SSID");
+    return;
+  }
   SavedWifiSettingsArray array{};
-  bool modified = false;
   this->saved_stas_pref_.load(&array);
+  this->sanitize_saved_wifi_array_(array);
+
+  bool modified = false;
   for (uint8_t i = 0; i < array.count; i++) {
     if (strcmp(array.entries[i].ssid, ssid) == 0) {
       // Shift remaining entries down to overwrite the deleted one
@@ -1117,13 +1244,10 @@ void WiFiComponent::delete_wifi_stas(const char *ssid) {
   }
   if (modified) {
     this->saved_stas_pref_.save(&array);
-    // If the currently active STA was deleted, clear it from memory and trigger reconnect
-    const WiFiAP *current_sta = this->get_selected_sta_();
-    if (current_sta != nullptr && current_sta->ssid_ == ssid) {
-      ESP_LOGI(TAG, "Deleted active WiFi STA " LOG_SECRET("'%s'"), ssid);
-      this->clear_sta();
-      this->connect_soon_();
-    }
+    this->sync_legacy_saved_wifi_pref_(array);
+    this->rebuild_sta_from_saved_wifi_array_(array);
+    global_preferences->sync();
+    this->connect_soon_();
   }
 }
 
@@ -1133,48 +1257,47 @@ void WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &
 
 void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
   SavedWifiSettingsArray array{};
-  
-  // 尝试加载已保存的WiFi数组
-  if (!this->saved_stas_pref_.load(&array)) {
-    // 如果加载失败，初始化为空数组
-    array.count = 0;
-    memset(&array, 0, sizeof(array));
-  }
-  
-  // 检查是否已达到最大保存数量
-  if (array.count >= SavedWifiSettingsArray::MAX_SAVED) {
-    ESP_LOGW(TAG, "Cannot append WiFi STA, maximum saved entries (%d) reached", 
-            SavedWifiSettingsArray::MAX_SAVED);
+  this->saved_stas_pref_.load(&array);
+  this->sanitize_saved_wifi_array_(array);
+
+  if (ssid == nullptr || ssid[0] == '\0') {
+    ESP_LOGW(TAG, "Cannot append WiFi STA with empty SSID");
     return;
   }
-  
+  const char *safe_password = password != nullptr ? password : "";
+
+  // 检查是否已达到最大保存数量
+  if (array.count >= SavedWifiSettingsArray::MAX_SAVED) {
+    int8_t existing_index = this->find_saved_wifi_index_(array, ssid);
+    if (existing_index < 0) {
+      ESP_LOGW(TAG, "Cannot append WiFi STA, maximum saved entries (%d) reached",
+               SavedWifiSettingsArray::MAX_SAVED);
+      return;
+    }
+  }
+
   // 检查SSID是否已经存在，避免重复添加
   for (uint8_t i = 0; i < array.count; i++) {
     if (strcmp(array.entries[i].ssid, ssid) == 0) {
       ESP_LOGD(TAG, "WiFi SSID '%s' already exists, updating password", ssid);
-      strncpy(array.entries[i].password, password, sizeof(array.entries[i].password) - 1);
+      strncpy(array.entries[i].password, safe_password, sizeof(array.entries[i].password) - 1);
       array.entries[i].password[sizeof(array.entries[i].password) - 1] = '\0';
-      
+
       // 保存更新后的数组
       this->saved_stas_pref_.save(&array);
+      this->sync_legacy_saved_wifi_pref_(array);
       global_preferences->sync();
-      
-      // 更新内存中的STA列表
-      for (auto &ap : this->sta_) {
-        if (ap.get_ssid() == ssid) {
-          ap.set_password(password);
-          break;
-        }
-      }
+
+      this->rebuild_sta_from_saved_wifi_array_(array, ssid);
       return;
     }
   }
-  
+
   // 添加新的WiFi条目
   SavedWifiSettings &entry = array.entries[array.count];
   strncpy(entry.ssid, ssid, sizeof(entry.ssid) - 1);
   entry.ssid[sizeof(entry.ssid) - 1] = '\0';  // 确保null终止
-  strncpy(entry.password, password, sizeof(entry.password) - 1);
+  strncpy(entry.password, safe_password, sizeof(entry.password) - 1);
   entry.password[sizeof(entry.password) - 1] = '\0';  // 确保null终止
   array.count++;
   
@@ -1184,22 +1307,50 @@ void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
     return;
   }
 
-  // 同时添加到当前sta_列表以便立即使用
-  WiFiAP ap{};
-  ap.set_ssid(ssid);
-  ap.set_password(password);
-  this->add_sta(ap);
-  
-  ESP_LOGI(TAG, "WiFi STA '%s' appended successfully (total: %d/%d)", 
-          ssid, array.count, SavedWifiSettingsArray::MAX_SAVED);
+  this->sync_legacy_saved_wifi_pref_(array);
+  this->rebuild_sta_from_saved_wifi_array_(array, ssid);
+
+  ESP_LOGI(TAG, "WiFi STA '%s' appended successfully (total: %d/%d)", ssid, array.count,
+           SavedWifiSettingsArray::MAX_SAVED);
 }
 
 void WiFiComponent::connect_soon_() {
-  // Only trigger retry if we're in cooldown - if already connecting/connected, do nothing
-  if (this->state_ == WIFI_COMPONENT_STATE_COOLDOWN) {
-    ESP_LOGD(TAG, "Exiting cooldown early due to new WiFi credentials");
-    this->retry_connect();
+  if (!this->has_sta() || this->state_ == WIFI_COMPONENT_STATE_DISABLED) {
+    return;
   }
+
+  ESP_LOGD(TAG, "Starting immediate WiFi reconnect due to new WiFi credentials");
+
+  // Reset transient state so the new credentials do not inherit stale
+  // retries, scan results, or roaming state from the previous attempt.
+  this->skip_cooldown_next_cycle_ = false;
+  this->cooldown_off_active_ = false;
+  this->cooldown_failures_ = 0;
+  this->num_retried_ = 0;
+  this->error_from_callback_ = false;
+  this->retry_phase_ = WiFiRetryPhase::INITIAL_CONNECT;
+  this->clear_roaming_state_();
+  this->scan_done_ = false;
+  this->scan_result_.clear();
+  this->has_completed_scan_after_captive_portal_start_ = false;
+
+  if (this->state_ == WIFI_COMPONENT_STATE_STA_SCANNING || this->state_ == WIFI_COMPONENT_STATE_STA_CONNECTING ||
+      this->state_ == WIFI_COMPONENT_STATE_STA_CONNECTED) {
+    this->wifi_disconnect_();
+  }
+
+  const WiFiAP *selected = this->get_selected_sta_();
+  if (selected == nullptr) {
+    return;
+  }
+
+  if (selected->get_hidden()) {
+    this->retry_phase_ = WiFiRetryPhase::EXPLICIT_HIDDEN;
+    this->start_connecting(this->build_params_for_current_phase_());
+    return;
+  }
+
+  this->start_connecting(*selected);
 }
 
 void WiFiComponent::start_connecting(const WiFiAP &ap) {
@@ -1414,8 +1565,19 @@ bool WiFiComponent::is_disabled() { return this->state_ == WIFI_COMPONENT_STATE_
 void WiFiComponent::start_scanning() {
   this->action_started_ = millis();
   ESP_LOGD(TAG, "Starting scan");
-  this->wifi_scan_start_(this->passive_scan_);
-  this->state_ = WIFI_COMPONENT_STATE_STA_SCANNING;
+  if (!this->wifi_scan_start_(this->passive_scan_)) {
+    ESP_LOGW(TAG, "Scan start failed");
+    this->scan_done_ = false;
+    this->scan_result_.clear();
+    if (this->has_sta()) {
+      this->state_ = WIFI_COMPONENT_STATE_COOLDOWN;
+      this->action_started_ = millis();
+    }
+    return;
+  }
+  if (this->has_sta()) {
+    this->state_ = WIFI_COMPONENT_STATE_STA_SCANNING;
+  }
 }
 
 /// Comparator for WiFi scan result sorting - determines which network should be tried first
@@ -2584,7 +2746,6 @@ void WiFiComponent::check_roaming_(uint32_t now) {
   }
 
   this->roaming_last_check_ = now;
-  this->roaming_attempts_++;
 
   // Guard: skip scan if signal is already good (no meaningful improvement possible)
   int8_t rssi = this->wifi_rssi();
@@ -2594,9 +2755,16 @@ void WiFiComponent::check_roaming_(uint32_t now) {
     return;
   }
 
-  ESP_LOGD(TAG, "Roam scan (%d dBm, attempt %u/%u)", rssi, this->roaming_attempts_, ROAMING_MAX_ATTEMPTS);
+  uint8_t next_attempt = this->roaming_attempts_ + 1;
+  ESP_LOGD(TAG, "Roam scan (%d dBm, attempt %u/%u)", rssi, next_attempt, ROAMING_MAX_ATTEMPTS);
+  if (!this->wifi_scan_start_(this->passive_scan_)) {
+    ESP_LOGW(TAG, "Roam scan start failed");
+    return;
+  }
+
+  this->roaming_attempts_ = next_attempt;
   this->roaming_state_ = RoamingState::SCANNING;
-  this->wifi_scan_start_(this->passive_scan_);
+  this->action_started_ = millis();
 }
 
 void WiFiComponent::process_roaming_scan_() {
