@@ -152,6 +152,17 @@ def generate_lv_conf_h():
     definitions = [as_macro(m, v) for m, v in lv_defines.items()] + [
         as_macro(m, "0") for m in unused_defines
     ]
+    definitions.append("#define LV_USE_TJPGD 1")
+    definitions.append("#define LV_USE_FS_POSIX 1")
+    definitions.append("#define LV_DISP_DEF_REFR_PERIOD 15")
+    definitions.append("#define LV_USE_LODEPNG 1")
+    definitions.append("#define LV_CACHE_DEF_SIZE 1048576")
+    definitions.append("#define LV_FS_POSIX_LETTER 'A'")
+    definitions.append("#define LV_FS_POSIX_CACHE_SIZE 524288")
+    definitions.append("#define LV_USE_TINY_TTF 1")
+    definitions.append("#define LV_TINY_TTF_FILE_SUPPORT 1")
+    definitions.append("#define LV_USE_FONT_COMPRESSED 1")
+    definitions.append("#define LV_USE_FONT_SUBPX 1")
     definitions.sort()
     return LV_CONF_H_FORMAT.format("\n".join(definitions))
 
@@ -255,10 +266,10 @@ async def to_code(configs):
             df.add_define("LV_DRAW_BUF_ALIGN", "64")
         else:
             df.add_define("LV_DRAW_BUF_ALIGN", "32")
-        add_idf_component(name="lvgl/lvgl", ref=LVGL_VERSION)
+        add_idf_component(name="lvgl/lvgl", repo="https://github.com/Cookie987/lvgl")
     else:
         df.add_define("LV_DRAW_BUF_ALIGN", "1")
-        cg.add_library("lvgl/lvgl", LVGL_VERSION)
+        cg.add_library("xcookie987x/lvgl-c", LVGL_VERSION)
     df.add_define("LV_DRAW_BUF_STRIDE_ALIGN", "1")
     df.add_define("LV_USE_DRAW_SW", "1")
     df.add_define("LV_USE_STDLIB_SPRINTF", "LV_STDLIB_CLIB")

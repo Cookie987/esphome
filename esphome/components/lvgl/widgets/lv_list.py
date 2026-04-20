@@ -15,8 +15,8 @@ from ..helpers import lvgl_components_required
 from ..lv_validation import lv_text
 from ..lvcode import LocalVariable, lv, lv_expr, lv_assign, lv_Pvariable, lv_add
 from ..schemas import part_schema, automation_schema
-from ..types import WidgetType, lv_obj_t, LvType
-from . import Widget, set_obj_properties
+from ..types import lv_obj_t, LvType
+from . import Widget, WidgetType, set_obj_properties
 from esphome import codegen as cg
 
 # Create mock widget types for styling purposes (not registered as real widgets)

@@ -151,6 +151,11 @@ class MipiSpi : public display::Display,
     this->brightness_ = brightness;
     this->reset_params_();
   }
+  void set_command(uint8_t cmd) {
+    if (this->is_failed() || !this->is_ready())
+      return;
+    this->write_command_(cmd);
+  }
   void set_rotation(display::DisplayRotation rotation) override {
     this->rotation_ = rotation;
     if constexpr (HAS_HARDWARE_ROTATION) {
