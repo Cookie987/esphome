@@ -11,9 +11,11 @@ from esphome.components.esp32 import (
     VARIANT_ESP32P4,
     VARIANT_ESP32S3,
     add_idf_sdkconfig_option,
+    get_esp32_variant,
 )
 import esphome.config_validation as cv
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_OPENTHREAD
+from esphome.core import TimePeriodMilliseconds
 import esphome.final_validate as fv
 
 from .const import (
@@ -70,6 +72,29 @@ async def power_management_lock_to_code(config, action_id, template_arg, args):
     return var
 
 
+def _validate_power_down(config):
+    if CONF_POWER_DOWN_PERIPHERALS not in config:
+        # figure out a default
+        light_sleep = config.get(CONF_ENABLE_LIGHT_SLEEP, False)
+        if light_sleep:
+            variant = get_esp32_variant()
+            # esp32, s2, s3, c3, c2 — no TOP_PD
+            config[CONF_POWER_DOWN_PERIPHERALS] = variant in (
+                VARIANT_ESP32C5,
+                VARIANT_ESP32C6,
+                VARIANT_ESP32C61,
+                VARIANT_ESP32H2,
+                # VARIANT_ESP32H21,
+                # VARIANT_ESP32H4,
+                VARIANT_ESP32P4,
+                VARIANT_ESP32S3,
+            )
+        else:
+            config[CONF_POWER_DOWN_PERIPHERALS] = False
+    # If it IS in config, user set it explicitly — leave it alone
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -84,24 +109,14 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_IDLE_TIME_BEFORE_SLEEP, default=3): cv.int_range(
                 min=2, max=4294967295
             ),
-            # c5,c6,c61,h2,h21,h4,p4
-            cv.SplitDefault(
-                CONF_POWER_DOWN_PERIPHERALS,
-                esp32_c5=True,
-                esp32_c6=True,
-                esp32_c61=True,
-                esp32_h2=True,
-                # esp32_h21=True,
-                # esp32_h4=True,
-                esp32_p4=True,
-                esp32=False,  # esp32, s2, s3, c3, c2 — no TOP_PD
-            ): cv.boolean,
+            cv.Optional(CONF_POWER_DOWN_PERIPHERALS): cv.boolean,
             cv.Optional(CONF_POWER_DOWN_FLASH): cv.boolean,
             cv.Optional(CONF_ESPHOME_LOCKS): cv.boolean,
             cv.Optional(CONF_PROFILING): cv.boolean,
             cv.Optional(CONF_TRACE): cv.boolean,
         }
     ).extend(cv.COMPONENT_SCHEMA),
+    _validate_power_down,
     cv.only_on_esp32,
 )
 
@@ -165,6 +180,14 @@ def _pm_final_validate(config):
         raise cv.Invalid(
             f"{CONF_POWER_DOWN_FLASH}: True not allowed when device has PSRAM"
         )
+    if (
+        config.get(CONF_ENABLE_LIGHT_SLEEP)
+        and (ot_conf := full_config.get(CONF_OPENTHREAD))
+        and (ot_conf.get("device_type") == "MTD")
+        and ((poll_period := ot_conf.get("poll_period")) is not None)
+        and (poll_period > TimePeriodMilliseconds(milliseconds=0))
+    ):
+        add_idf_sdkconfig_option("CONFIG_LWIP_ND6", False)
 
     if not (config.get(CONF_ENABLE_LIGHT_SLEEP)):
         if config.get(CONF_POWER_DOWN_PERIPHERALS):
