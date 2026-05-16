@@ -22,7 +22,7 @@ static const size_t RMT_SYMBOLS_PER_BYTE = 8;
 // the 15-bit rmt_symbol_word_t duration field max of 32767.
 static uint32_t rmt_resolution_hz() {
   uint32_t freq;
-  esp_clk_tree_src_get_freq_hz((soc_module_clk_t) RMT_CLK_SRC_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &freq);
+  esp_clk_tree_src_get_freq_hz((soc_module_clk_t) RMT_CLK_SRC_APB, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &freq);
   return freq;
 }
 
@@ -94,7 +94,7 @@ void ESP32RMTLEDStripLightOutput::setup() {
 
   rmt_tx_channel_config_t channel;
   memset(&channel, 0, sizeof(channel));
-  channel.clk_src = RMT_CLK_SRC_XTAL;
+  channel.clk_src = RMT_CLK_SRC_APB;
   channel.resolution_hz = rmt_resolution_hz();
   channel.gpio_num = gpio_num_t(this->pin_);
   channel.mem_block_symbols = this->rmt_symbols_;
@@ -102,7 +102,7 @@ void ESP32RMTLEDStripLightOutput::setup() {
   channel.flags.invert_out = this->invert_out_;
   channel.flags.with_dma = this->use_dma_;
   channel.intr_priority = 0;
-  channel.flags.allow_pd = 1; // 允许在休眠时对 RMT 外设掉电
+  // channel.flags.allow_pd = 1; // 允许在休眠时对 RMT 外设掉电
   if (rmt_new_tx_channel(&channel, &this->channel_) != ESP_OK) {
     ESP_LOGE(TAG, "Channel creation failed");
     this->mark_failed();
