@@ -4,11 +4,12 @@ from esphome.components import esp32
 from esphome.components.esp32 import (
     VARIANT_ESP32C5,
     VARIANT_ESP32C6,
-    VARIANT_ESP32S3,
+    VARIANT_ESP32C61,
     VARIANT_ESP32H2,
     # VARIANT_ESP32H21,
     # VARIANT_ESP32H4,
     VARIANT_ESP32P4,
+    VARIANT_ESP32S3,
     add_idf_sdkconfig_option,
 )
 import esphome.config_validation as cv
@@ -83,7 +84,18 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_IDLE_TIME_BEFORE_SLEEP, default=3): cv.int_range(
                 min=2, max=4294967295
             ),
-            cv.Optional(CONF_POWER_DOWN_PERIPHERALS): cv.boolean,
+            # c5,c6,c61,h2,h21,h4,p4
+            cv.SplitDefault(
+                CONF_POWER_DOWN_PERIPHERALS,
+                esp32_c5=True,
+                esp32_c6=True,
+                esp32_c61=True,
+                esp32_h2=True,
+                # esp32_h21=True,
+                # esp32_h4=True,
+                esp32_p4=True,
+                esp32=False,  # esp32, s2, s3, c3, c2 — no TOP_PD
+            ): cv.boolean,
             cv.Optional(CONF_POWER_DOWN_FLASH): cv.boolean,
             cv.Optional(CONF_ESPHOME_LOCKS): cv.boolean,
             cv.Optional(CONF_PROFILING): cv.boolean,
@@ -98,6 +110,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     add_idf_sdkconfig_option("CONFIG_PM_ENABLE", True)
+    add_idf_sdkconfig_option("CONFIG_ESP_PHY_MAC_BB_PD", True)
 
     if config.get(CONF_ESPHOME_LOCKS):
         cg.add_define("USE_POWER_MANAGEMENT")
@@ -114,7 +127,6 @@ async def to_code(config):
         # this causes automatic light sleep if no tasks are pending
         add_idf_sdkconfig_option("CONFIG_FREERTOS_USE_TICKLESS_IDLE", True)
         add_idf_sdkconfig_option("CONFIG_IEEE802154_SLEEP_ENABLE", True)
-        add_idf_sdkconfig_option("CONFIG_PM_LIGHT_SLEEP_CALLBACKS", True)
         if config.get(CONF_POWER_DOWN_PERIPHERALS):
             # There is a defined set of peripheral's that work with PM
             add_idf_sdkconfig_option(
@@ -170,6 +182,7 @@ def _pm_final_validate(config):
             supported=[
                 VARIANT_ESP32C5,
                 VARIANT_ESP32C6,
+                VARIANT_ESP32C61,
                 VARIANT_ESP32H2,
                 # VARIANT_ESP32H21,
                 # VARIANT_ESP32H4,

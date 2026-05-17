@@ -1,21 +1,14 @@
 #include "power_management.h"
 #ifdef USE_ESP32
-#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include <cstdio>
+#ifdef CONFIG_OPENTHREAD_MTD
+#include "esphome/components/openthread/openthread.h"
+#endif
 
 namespace esphome::power_management {
 
 static const char *const TAG = "power_management";
-
-#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
-esp_err_t pm_after_wake_up_callback(int64_t sleep_time_us, void *arg) {
-  PowerManagement *obj = (PowerManagement *) arg;
-  obj->is_delay_aborted = true;
-  xTaskNotifyGive(obj->task_handle);
-  return ESP_OK;
-}
-#endif
 
 void PowerManagement::setup() {
   esp_err_t rc = ESP_OK;
@@ -41,6 +34,13 @@ void PowerManagement::setup() {
     return;
   }
 
+  soc_rtc_slow_clk_src_t slow_clk_src = rtc_clk_slow_src_get();
+  if (slow_clk_src != SOC_RTC_SLOW_CLK_SRC_XTAL32K) {
+    ESP_LOGI(TAG, "32k XTAL not in use");
+  } else {
+    ESP_LOGI(TAG, "32k XTAL in use");
+  }
+
 #ifdef USE_POWER_MANAGEMENT
   // Create Locks
   for (uint8_t i = 0; i < PowerManagement::PM_LOCK_ARRAY_SIZE; i++) {
@@ -51,61 +51,6 @@ void PowerManagement::setup() {
       this->pm_lock_handles_[i] = NULL;
       ESP_LOGE(TAG, "Failed esp_pm_lock_create %s %d", power_manager_type_to_string((PowerManagementLockType) i), rc);
       return;
-    }
-  }
-#endif
-
-#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
-  task_handle = xTaskGetCurrentTaskHandle();
-  esp_pm_sleep_cbs_register_config_t pm_callbacks = {
-      .enter_cb = NULL,
-      .exit_cb = pm_after_wake_up_callback,
-      .enter_cb_user_arg = NULL,
-      .exit_cb_user_arg = this,
-      .enter_cb_prior = 1,
-      .exit_cb_prior = 1,
-  };
-
-  rc = esp_pm_light_sleep_register_cbs(&pm_callbacks);
-  if (rc != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to register power management callbacks: %s", esp_err_to_name(rc));
-  }
-#endif
-}
-
-void PowerManagement::loop() {
-#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
-  if (this->ready_to_sleep_()) {
-    this->is_delay_aborted = false;
-    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
-    if (this->is_delay_aborted) {
-      esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-      switch (wakeup_reason) {
-        case ESP_SLEEP_WAKEUP_EXT0:
-          ESP_LOGV(TAG, "light sleep wakeup: RTC_IO (EXT0 - single pad)");
-          break;
-        case ESP_SLEEP_WAKEUP_EXT1:
-          ESP_LOGV(TAG, "light sleep wakeup: RTC_IO (EXT1 - multiple pads)");
-          break;
-        case ESP_SLEEP_WAKEUP_TIMER:
-          ESP_LOGV(TAG, "light sleep wakeup: Timer");
-          break;
-        case ESP_SLEEP_WAKEUP_TOUCHPAD:
-          ESP_LOGV(TAG, "light sleep wakeup: Touchpad");
-          break;
-        case ESP_SLEEP_WAKEUP_ULP:
-          ESP_LOGV(TAG, "light sleep wakeup: ULP program");
-          break;
-        case ESP_SLEEP_WAKEUP_GPIO:
-          ESP_LOGV(TAG, "light sleep wakeup: GPIO (Light Sleep only)");
-          break;
-        case ESP_SLEEP_WAKEUP_UART:
-          ESP_LOGV(TAG, "light sleep wakeup: UART");
-          break;
-        default:
-          ESP_LOGV(TAG, "light sleep wakeup unknown: %d", wakeup_reason);
-          break;
-      }
     }
   }
 #endif
