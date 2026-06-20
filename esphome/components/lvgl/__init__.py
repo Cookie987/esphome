@@ -628,36 +628,6 @@ LVGL_TOP_LEVEL_SCHEMA = (
                 )
             ),
             cv.Optional(CONF_ON_IDLE): validate_automation(
-                    {
-                        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
-                            Trigger.template(lv_obj_t_ptr, lv_event_t_ptr)
-                        ),
-                    }
-                )
-                for event in df.LV_SCREEN_EVENT_TRIGGERS + df.LV_DISPLAY_EVENT_TRIGGERS
-            },
-            cv.GenerateID(CONF_ID): cv.declare_id(LvglComponent),
-            cv.GenerateID(CONF_ALIGN_TO_LAMBDA_ID): cv.declare_id(lv_lambda_t),
-            cv.GenerateID(df.CONF_DISPLAYS): display_schema,
-            cv.Optional(CONF_COLOR_DEPTH, default=16): cv.one_of(16),
-            cv.Optional(df.CONF_DEFAULT_FONT, default="montserrat_14"): lvalid.lv_font,
-            cv.Optional(df.CONF_FULL_REFRESH, default=False): cv.boolean,
-            cv.Optional(df.CONF_UPDATE_WHEN_DISPLAY_IDLE, default=False): cv.boolean,
-            cv.Optional(CONF_DRAW_ROUNDING, default=2): cv.positive_int,
-            cv.Optional(CONF_BUFFER_SIZE, default=0): cv.percentage,
-            cv.Optional(CONF_ROTATION): validate_rotation,
-            cv.Optional(CONF_LOG_LEVEL, default="WARN"): cv.one_of(
-                *df.LV_LOG_LEVELS, upper=True
-            ),
-            cv.Optional(CONF_BYTE_ORDER): cv.one_of(
-                "big_endian", "little_endian", lower=True
-            ),
-            cv.Optional(df.CONF_STYLE_DEFINITIONS): cv.ensure_list(
-                cv.Schema({cv.Required(CONF_ID): cv.declare_id(lv_style_t)}).extend(
-                    FULL_STYLE_SCHEMA
-                )
-            ),
-            cv.Optional(CONF_ON_IDLE): validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(IdleTrigger),
                     cv.Required(CONF_TIMEOUT): cv.templatable(
