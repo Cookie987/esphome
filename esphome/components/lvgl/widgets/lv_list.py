@@ -11,7 +11,6 @@ from ..defines import (
     CONF_SELECTED,
     literal,
 )
-from ..helpers import lvgl_components_required
 from ..lv_validation import lv_text
 from ..lvcode import LocalVariable, lv, lv_expr, lv_assign, lv_Pvariable, lv_add
 from ..schemas import part_schema, automation_schema
@@ -62,8 +61,6 @@ class ListType(WidgetType):
         )
 
     async def to_code(self, w: Widget, config):
-        lvgl_components_required.add(CONF_LIST)
-        
         if items := config.get(CONF_ITEMS):
             for item_config in items:
                 if item_text := item_config.get(CONF_TEXT):
