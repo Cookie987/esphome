@@ -607,7 +607,7 @@ haier_protocol::HaierMessage HonClimate::get_control_message() {
     if (climate_control.target_temperature.has_value()) {
       float target_temp = climate_control.target_temperature.value();
       out_data->set_point = ((int) target_temp) - 16;  // set the temperature with offset 16
-      out_data->half_degree = (target_temp - ((int) target_temp) >= 0.49) ? 1 : 0;
+      out_data->half_degree = (target_temp - ((int) target_temp) >= 0.49f) ? 1 : 0;
     }
     if (out_data->ac_power == 0) {
       // If AC is off - no presets allowed
@@ -825,7 +825,7 @@ haier_protocol::HandlerError HonClimate::process_status_message_(const uint8_t *
 #ifdef USE_SENSOR
     this->update_sub_sensor_(SubSensorType::INDOOR_COIL_TEMPERATURE, bd_packet->indoor_coil_temperature / 2.0 - 20);
     this->update_sub_sensor_(SubSensorType::OUTDOOR_COIL_TEMPERATURE, bd_packet->outdoor_coil_temperature - 64);
-    this->update_sub_sensor_(SubSensorType::OUTDOOR_DEFROST_TEMPERATURE, bd_packet->outdoor_coil_temperature - 64);
+    this->update_sub_sensor_(SubSensorType::OUTDOOR_DEFROST_TEMPERATURE, bd_packet->outdoor_defrost_temperature - 64);
     this->update_sub_sensor_(SubSensorType::OUTDOOR_IN_AIR_TEMPERATURE, bd_packet->outdoor_in_air_temperature - 64);
     this->update_sub_sensor_(SubSensorType::OUTDOOR_OUT_AIR_TEMPERATURE, bd_packet->outdoor_out_air_temperature - 64);
     this->update_sub_sensor_(SubSensorType::POWER, encode_uint16(bd_packet->power[0], bd_packet->power[1]));

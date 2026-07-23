@@ -809,7 +809,7 @@ class Display : public PollingComponent {
   bool show_test_card_{false};
 };
 
-class DisplayPage {
+class DisplayPage final {
  public:
   DisplayPage(display_writer_t writer);
   void show();
@@ -827,7 +827,7 @@ class DisplayPage {
   DisplayPage *next_{nullptr};
 };
 
-template<typename... Ts> class DisplayPageShowAction : public Action<Ts...> {
+template<typename... Ts> class DisplayPageShowAction final : public Action<Ts...> {
  public:
   TEMPLATABLE_VALUE(DisplayPage *, page)
 
@@ -839,7 +839,7 @@ template<typename... Ts> class DisplayPageShowAction : public Action<Ts...> {
   }
 };
 
-template<typename... Ts> class DisplayPageShowNextAction : public Action<Ts...> {
+template<typename... Ts> class DisplayPageShowNextAction final : public Action<Ts...> {
  public:
   DisplayPageShowNextAction(Display *buffer) : buffer_(buffer) {}
 
@@ -848,7 +848,7 @@ template<typename... Ts> class DisplayPageShowNextAction : public Action<Ts...> 
   Display *buffer_;
 };
 
-template<typename... Ts> class DisplayPageShowPrevAction : public Action<Ts...> {
+template<typename... Ts> class DisplayPageShowPrevAction final : public Action<Ts...> {
  public:
   DisplayPageShowPrevAction(Display *buffer) : buffer_(buffer) {}
 
@@ -857,7 +857,7 @@ template<typename... Ts> class DisplayPageShowPrevAction : public Action<Ts...> 
   Display *buffer_;
 };
 
-template<typename... Ts> class DisplayIsDisplayingPageCondition : public Condition<Ts...> {
+template<typename... Ts> class DisplayIsDisplayingPageCondition final : public Condition<Ts...> {
  public:
   DisplayIsDisplayingPageCondition(Display *parent) : parent_(parent) {}
 
@@ -869,7 +869,7 @@ template<typename... Ts> class DisplayIsDisplayingPageCondition : public Conditi
   DisplayPage *page_;
 };
 
-class DisplayOnPageChangeTrigger : public Trigger<DisplayPage *, DisplayPage *> {
+class DisplayOnPageChangeTrigger final : public Trigger<DisplayPage *, DisplayPage *> {
  public:
   explicit DisplayOnPageChangeTrigger(Display *parent) { parent->add_on_page_change_trigger(this); }
   void process(DisplayPage *from, DisplayPage *to);
