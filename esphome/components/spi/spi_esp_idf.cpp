@@ -2,6 +2,10 @@
 #include <cstring>
 #include <vector>
 
+#ifdef USE_ESP32
+#include "esp_memory_utils.h"
+#endif
+
 namespace esphome::spi {
 
 #ifdef USE_ESP32
@@ -208,6 +212,12 @@ class SPIDelegateHw : public SPIDelegate {
       desc.rxlength = 0;
       desc.tx_buffer = ptr;
       desc.rx_buffer = nullptr;
+#ifdef USE_ESP32
+      // DMA directly from PSRAM when supported: avoids copying each chunk through internal SRAM.
+      // The driver falls back to a (PSRAM-backed) temp buffer when the address is not DMA-ext-capable.
+      if (esp_ptr_external_ram(ptr) && esp_ptr_dma_ext_capable(ptr))
+        desc.flags |= SPI_TRANS_DMA_USE_PSRAM;
+#endif
       esp_err_t err = spi_device_queue_trans(this->handle_, &desc, portMAX_DELAY);
       if (err != ESP_OK) {
         ESP_LOGE(TAG, "Queue transmit failed - err %X", err);
@@ -254,7 +264,10 @@ class SPIDelegateHw : public SPIDelegate {
     config.clock_speed_hz = static_cast<int>(this->data_rate_);
     config.spics_io_num = -1;
     config.flags = 0;
-    config.queue_size = 2;
+    // Must be large enough to hold every chunk of one LVGL flush (up to 38 chunks for a full
+    // 153,600-byte screen at 4092 B per chunk). If queue_write_array() ever has to block while
+    // the queue is full, the queued transfer stalls and never completes.
+    config.queue_size = 40;
     config.pre_cb = nullptr;
     config.post_cb = nullptr;
     if (this->bit_order_ == BIT_ORDER_LSB_FIRST)

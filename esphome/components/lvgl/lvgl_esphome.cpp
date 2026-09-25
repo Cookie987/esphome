@@ -836,6 +836,7 @@ void LvglComponent::setup() {
   this->set_resolution_();
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
+  lv_display_set_flush_wait_cb(this->disp_, static_flush_wait_cb);
   lv_display_set_user_data(this->disp_, this);
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
   lv_display_set_buffers(this->disp_, this->draw_buf_, this->draw_buf2_, buf_bytes,
@@ -936,6 +937,27 @@ void lv_animimg_stop(lv_obj_t *obj) {
 #endif
 void LvglComponent::static_flush_cb(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *color_p) {
   reinterpret_cast<LvglComponent *>(lv_display_get_user_data(disp_drv))->flush_cb_(disp_drv, area, color_p);
+}
+
+void LvglComponent::static_flush_wait_cb(lv_display_t *disp_drv) {
+  reinterpret_cast<LvglComponent *>(lv_display_get_user_data(disp_drv))->wait_flush_complete_();
+}
+
+void LvglComponent::wait_flush_complete_() {
+  // LVGL blocks here before starting the next flush while the previous async write is still in
+  // flight. The SPI transfer completes via interrupt/DMA, so poll the queue here instead of
+  // waiting for loop() (which is blocked inside lv_timer_handler and can never advance).
+  if (this->async_display_ == nullptr)
+    return;
+  auto deadline = millis() + 1000;
+  while (!this->async_display_->update_async_write()) {
+    if (millis() > deadline) {
+      ESP_LOGE(TAG, "Flush wait timed out");
+      return;  // keep the pending state so the next wait/loop retries instead of corrupting it
+    }
+  }
+  this->async_flush_pending_ = false;
+  this->async_display_ = nullptr;
 }
 
 #ifdef USE_LVGL_SCALE

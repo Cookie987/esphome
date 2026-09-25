@@ -285,12 +285,31 @@ class MipiSpi : public display::Display,
       return get_height();
     return HEIGHT;
   }
+  // Never run a synchronous SPI transaction while an async write is in flight: the sync
+  // enable()/disable() pair would release the bus lock owned by the async write and cause an
+  // unbalanced release when the async write later completes.
+  bool sync_wait_() {
+    if (!this->async_in_progress_)
+      return true;
+    auto deadline = millis() + 1000;
+    while (this->async_in_progress_) {
+      if (this->update_async_write())
+        return true;
+      if (millis() > deadline) {
+        esph_log_e(TAG, "Async write stuck, skipping sync transaction");
+        return false;
+      }
+    }
+    return true;
+  }
   // convenience functions to write commands with or without data
   void write_command_(uint8_t cmd, uint8_t data) { this->write_command_(cmd, &data, 1); }
   void write_command_(uint8_t cmd) { this->write_command_(cmd, &cmd, 0); }
 
   // Writes a command to the display, with the given bytes.
   void write_command_(uint8_t cmd, const uint8_t *bytes, size_t len) {
+    if (!this->sync_wait_())
+      return;
     char hex_buf[format_hex_pretty_size(MIPI_SPI_MAX_CMD_LOG_BYTES)];
     // Don't spam the log after setup
     if (this->init_sequence_.empty()) {
@@ -475,6 +494,8 @@ class MipiSpi : public display::Display,
    */
   void write_to_display_(int x_start, int y_start, int w, int h, const BUFFERTYPE *ptr, int x_offset, int y_offset,
                          int x_pad) {
+    if (!this->sync_wait_())
+      return;
     this->set_addr_window_(x_start, y_start, x_start + w - 1, y_start + h - 1);
     this->enable();
     ptr += y_offset * (x_offset + w + x_pad) + x_offset;

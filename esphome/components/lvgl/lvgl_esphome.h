@@ -200,6 +200,7 @@ class LvglComponent final : public PollingComponent {
                 bool resume_on_input, bool update_when_display_idle, RotationType rotation_type, bool use_dma,
                 bool use_psram, bool double_buffer);
   static void static_flush_cb(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *color_p);
+  static void static_flush_wait_cb(lv_display_t *disp_drv);
   /**
    *
    * @param obj A widget
@@ -331,6 +332,7 @@ class LvglComponent final : public PollingComponent {
                    uint32_t height_rounded);
 #endif
   void flush_cb_(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *color_p);
+  void wait_flush_complete_();
   std::vector<display::Display *> displays_{};
   size_t buffer_frac_{1};
   bool full_refresh_{};
