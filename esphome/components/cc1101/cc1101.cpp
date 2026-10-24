@@ -253,11 +253,17 @@ void CC1101Component::dump_config() {
 }
 
 void CC1101Component::begin_tx() {
+  // Read the mode before the PKTCTRL0 write below overwrites it in state_
+  const bool packet_mode = this->state_.PKT_FORMAT == static_cast<uint8_t>(PacketFormat::PACKET_FORMAT_FIFO);
   // Ensure Packet Format is 3 (Async Serial)
   this->write_(Register::PKTCTRL0, 0x32);
   ESP_LOGV(TAG, "Beginning TX sequence");
   if (this->gdo0_pin_ != nullptr) {
-    this->gdo0_pin_->detach_interrupt();
+    // setup() only attaches the interrupt in packet mode. In async serial mode the pin may be
+    // shared with remote_receiver, and detaching here would remove the receiver's interrupt.
+    if (packet_mode) {
+      this->gdo0_pin_->detach_interrupt();
+    }
     this->gdo0_pin_->pin_mode(gpio::FLAG_OUTPUT);
   }
   // Transition through IDLE to bypass CCA (Clear Channel Assessment) which can
@@ -669,6 +675,69 @@ void CC1101Component::set_hyst_level(HystLevel value) {
   this->state_.HYST_LEVEL = static_cast<uint8_t>(value);
   if (this->initialized_) {
     this->write_(Register::AGCCTRL0);
+  }
+}
+
+void CC1101Component::set_foc_bs_cs_gate(bool value) {
+  this->state_.FOC_BS_CS_GATE = value ? 1 : 0;
+  if (this->initialized_) {
+    this->write_(Register::FOCCFG);
+  }
+}
+
+void CC1101Component::set_foc_limit(FocLimit value) {
+  this->state_.FOC_LIMIT = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::FOCCFG);
+  }
+}
+
+void CC1101Component::set_foc_pre_k(FocPreK value) {
+  this->state_.FOC_PRE_K = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::FOCCFG);
+  }
+}
+
+void CC1101Component::set_foc_post_k(FocPostK value) {
+  this->state_.FOC_POST_K = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::FOCCFG);
+  }
+}
+
+void CC1101Component::set_bs_limit(BsLimit value) {
+  this->state_.BS_LIMIT = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::BSCFG);
+  }
+}
+
+void CC1101Component::set_bs_pre_ki(BsPreKi value) {
+  this->state_.BS_PRE_KI = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::BSCFG);
+  }
+}
+
+void CC1101Component::set_bs_pre_kp(BsPreKp value) {
+  this->state_.BS_PRE_KP = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::BSCFG);
+  }
+}
+
+void CC1101Component::set_bs_post_ki(BsPostKi value) {
+  this->state_.BS_POST_KI = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::BSCFG);
+  }
+}
+
+void CC1101Component::set_bs_post_kp(BsPostKp value) {
+  this->state_.BS_POST_KP = static_cast<uint8_t>(value);
+  if (this->initialized_) {
+    this->write_(Register::BSCFG);
   }
 }
 
