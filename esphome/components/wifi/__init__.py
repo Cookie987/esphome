@@ -7,6 +7,7 @@ from esphome.automation import Condition
 import esphome.codegen as cg
 from esphome.components.const import CONF_ENABLED, CONF_USE_PSRAM
 from esphome.components.esp32 import (
+    add_idf_component,
     add_idf_sdkconfig_option,
     const,
     get_esp32_variant,
@@ -697,6 +698,9 @@ async def to_code(config):
 
     # Disable Enterprise WiFi support if no EAP is configured
     if CORE.is_esp32:
+        # Saved WiFi credentials live in /data/wifilist.json on LittleFS; the
+        # same managed component the json component registers (idempotent).
+        add_idf_component(name="bblanchon/arduinojson", ref="7.4.3")
         add_idf_sdkconfig_option("CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT", has_eap)
         if has_eap:
             # The supplicant's Kconfig select cannot override the IDF 5 TLS

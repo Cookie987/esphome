@@ -409,7 +409,7 @@ static constexpr uint32_t WIFI_COOLDOWN_WITH_AP_ACTIVE_MS = 30000;
 /// Timeout for WiFi scan operations
 /// This is a fallback in case we don't receive a scan done callback from the WiFi driver.
 /// Normal scans complete via callback; this only triggers if something goes wrong.
-static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 31000;
+static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 15000;
 
 /// Timeout for WiFi connection attempts
 /// This is a fallback in case we don't receive connection success/failure callbacks.
@@ -419,7 +419,7 @@ static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 31000;
 /// If this timeout fires prematurely while a connection is still in progress, it causes
 /// cascading failures: the subsequent scan will also fail because the WiFi driver is
 /// still busy with the previous connection attempt.
-static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 46000;
+static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 25000;
 
 static constexpr uint8_t get_max_retries_for_phase(WiFiRetryPhase phase) {
   switch (phase) {
@@ -690,49 +690,10 @@ void WiFiComponent::start() {
   ESP_LOGCONFIG(TAG, "Starting");
   this->last_connected_ = millis();
 
-  uint32_t hash = this->has_sta() ? App.get_config_version_hash() : 88491487UL;
-
-  this->pref_ = global_preferences->make_preference<wifi::SavedWifiSettings>(hash, true);
-  this->saved_stas_pref_ = global_preferences->make_preference<wifi::SavedWifiSettingsArray>(hash + 2, true);
-#ifdef USE_WIFI_FAST_CONNECT
-#ifdef USE_WIFI_FAST_CONNECT_IN_FLASH
-  const bool fast_connect_in_flash = true;
-#else
-  const bool fast_connect_in_flash = false;
-#endif
-  this->fast_connect_pref_ =
-      global_preferences->make_preference<wifi::SavedWifiFastConnectSettings>(hash + 1, fast_connect_in_flash);
-#endif
-
-  // Load saved WiFi STAs from array preference
-  SavedWifiSettingsArray saved_array{};
-  bool has_saved_array = this->saved_stas_pref_.load(&saved_array);
-  if (has_saved_array) {
-    bool sanitized = this->sanitize_saved_wifi_array_(saved_array);
-    if (sanitized) {
-      this->saved_stas_pref_.save(&saved_array);
-    }
-    if (saved_array.count > 0) {
-      ESP_LOGD(TAG, "Loaded %d saved WiFi STAs", saved_array.count);
-      this->rebuild_sta_from_saved_wifi_array_(saved_array);
-      for (uint8_t i = 0; i < saved_array.count; i++) {
-        ESP_LOGD(TAG, "  [%d] SSID: %s", i, saved_array.entries[i].ssid);
-      }
-    } else {
-      ESP_LOGD(TAG, "Loaded empty saved WiFi STA list");
-    }
-  } else {
-    // Fallback to single saved WiFi STA for backward compatibility
-    SavedWifiSettings save{};
-    if (this->pref_.load(&save) && save.ssid[0] != '\0') {
-      ESP_LOGD(TAG, "Loaded single saved WiFi STA: %s", save.ssid);
-      saved_array.count = 1;
-      strncpy(saved_array.entries[0].ssid, save.ssid, sizeof(saved_array.entries[0].ssid) - 1);
-      strncpy(saved_array.entries[0].password, save.password, sizeof(saved_array.entries[0].password) - 1);
-      this->sanitize_saved_wifi_array_(saved_array);
-      this->saved_stas_pref_.save(&saved_array);
-      this->rebuild_sta_from_saved_wifi_array_(saved_array);
-    }
+  // Load saved WiFi credentials from LittleFS
+  if (!this->load_creds_from_littlefs_()) {
+    // File not found or invalid — try migrating from NVS (backward compatibility)
+    this->migrate_nvs_to_littlefs_();
   }
 
   if (this->has_sta()) {
@@ -1201,19 +1162,167 @@ void WiFiComponent::rebuild_sta_from_saved_wifi_array_(const SavedWifiSettingsAr
   this->selected_sta_index_ = preferred_index >= 0 ? preferred_index : 0;
 }
 
-void WiFiComponent::sync_legacy_saved_wifi_pref_(const SavedWifiSettingsArray &array) {
-  SavedWifiSettings legacy{};
-  if (array.count > 0) {
-    strncpy(legacy.ssid, array.entries[0].ssid, sizeof(legacy.ssid) - 1);
-    strncpy(legacy.password, array.entries[0].password, sizeof(legacy.password) - 1);
+bool WiFiComponent::ssid_in_sta_list_(const std::string &ssid) const {
+  if (ssid.empty() || this->sta_.empty()) {
+    return false;
   }
-void WiFiComponent::sync_legacy_saved_wifi_pref_(const SavedWifiSettingsArray &array) {
-  SavedWifiSettings legacy{};
-  if (array.count > 0) {
-    strncpy(legacy.ssid, array.entries[0].ssid, sizeof(legacy.ssid) - 1);
-    strncpy(legacy.password, array.entries[0].password, sizeof(legacy.password) - 1);
+  for (const auto &ap : this->sta_) {
+    if (ap.get_ssid() == ssid) {
+      return true;
+    }
   }
-  this->pref_.save(&legacy);
+  return false;
+}
+
+void WiFiComponent::reload_saved_wifi_stas() {
+  this->reload_saved_wifi_stas(nullptr);
+}
+
+void WiFiComponent::reload_saved_wifi_stas(const char *preferred_ssid) {
+  ESP_LOGI(TAG, "Reloading saved WiFi STAs from LittleFS");
+
+  // Snapshot what we are currently doing so the refresh below can avoid
+  // needlessly tearing down a working connection or an in-flight attempt.
+  std::string connected_ssid;
+  if (this->connected_) {
+    char ssid_buf[SSID_BUFFER_SIZE];
+    connected_ssid = wifi_ssid_to(ssid_buf);
+  }
+  std::string target_ssid;
+  if (const WiFiAP *selected = this->get_selected_sta_(); selected != nullptr) {
+    target_ssid = selected->get_ssid();
+  }
+  WiFiComponentState state_before = this->state_;
+
+  bool keep_current = false;
+  if (this->load_creds_from_littlefs_(preferred_ssid)) {
+    if (!connected_ssid.empty() && this->ssid_in_sta_list_(connected_ssid)) {
+      // Already connected to a network that is still in the (possibly updated)
+      // saved list. Keep the connection — no need to bounce it.
+      keep_current = true;
+    } else if (state_before == WIFI_COMPONENT_STATE_STA_CONNECTING ||
+               state_before == WIFI_COMPONENT_STATE_STA_CONNECTED) {
+      // An attempt is in flight toward target_ssid. Don't interrupt it when the
+      // refreshed list still contains that network and the caller didn't request
+      // a specific different network.
+      if (preferred_ssid == nullptr && !target_ssid.empty() && this->ssid_in_sta_list_(target_ssid)) {
+        keep_current = true;
+      }
+    } else if (state_before == WIFI_COMPONENT_STATE_STA_SCANNING) {
+      // A scan is in flight; when it completes, the scan-based selection matches
+      // against the refreshed sta_ list, so interrupting would only waste time.
+      keep_current = true;
+    }
+  }
+
+  if (keep_current) {
+    ESP_LOGD(TAG, "Saved WiFi list refreshed without interrupting current connection");
+    return;
+  }
+
+  this->connect_soon_();
+}
+
+bool WiFiComponent::load_creds_from_littlefs_(const char *preferred_ssid) {
+  std::ifstream ifs(WIFI_CREDS_FILE);
+  if (!ifs.is_open()) {
+    ESP_LOGD(TAG, "WiFi credentials file not found: %s", WIFI_CREDS_FILE);
+    return false;
+  }
+
+  // Read entire file content
+  std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+  ifs.close();
+
+  if (content.empty()) {
+    ESP_LOGW(TAG, "WiFi credentials file is empty");
+    return false;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, content);
+  if (err) {
+    ESP_LOGW(TAG, "Failed to parse WiFi credentials JSON: %s", err.c_str());
+    return false;
+  }
+
+  int status_code = doc["statusCode"] | 0;
+  if (status_code != 200) {
+    const char *error_msg = doc["error"] | "unknown";
+    ESP_LOGW(TAG, "WiFi credentials error: %s", error_msg);
+    return false;
+  }
+
+  SavedWifiSettingsArray saved_array{};
+  JsonArray wifis = doc["wifis"];
+  for (JsonObject wifi : wifis) {
+    if (saved_array.count >= SavedWifiSettingsArray::MAX_SAVED)
+      break;
+    const char *ssid = wifi["ssid"] | "";
+    const char *password = wifi["password"] | "";
+    if (ssid[0] == '\0')
+      continue;
+    strncpy(saved_array.entries[saved_array.count].ssid, ssid, sizeof(saved_array.entries[0].ssid) - 1);
+    strncpy(saved_array.entries[saved_array.count].password, password, sizeof(saved_array.entries[0].password) - 1);
+    saved_array.count++;
+  }
+
+  this->sanitize_saved_wifi_array_(saved_array);
+  this->rebuild_sta_from_saved_wifi_array_(saved_array, preferred_ssid);
+  ESP_LOGI(TAG, "Loaded %d saved WiFi STAs from LittleFS", saved_array.count);
+  return true;
+}
+
+bool WiFiComponent::save_creds_to_littlefs_() {
+  JsonDocument doc;
+  doc["statusCode"] = 200;
+  doc["error"] = nullptr;
+  JsonArray wifis = doc["wifis"].to<JsonArray>();
+
+  for (size_t i = 0; i < this->sta_.size(); i++) {
+    JsonObject wifi = wifis.add<JsonObject>();
+    wifi["ssid"] = this->sta_[i].get_ssid().c_str();
+    wifi["password"] = this->sta_[i].get_password().c_str();
+  }
+
+  std::ofstream ofs(WIFI_CREDS_FILE);
+  if (!ofs.is_open()) {
+    ESP_LOGE(TAG, "Failed to open WiFi credentials file for writing: %s", WIFI_CREDS_FILE);
+    return false;
+  }
+  serializeJson(doc, ofs);
+  ESP_LOGD(TAG, "Saved %zu WiFi STAs to LittleFS", this->sta_.size());
+  return true;
+}
+
+void WiFiComponent::migrate_nvs_to_littlefs_() {
+  ESP_LOGI(TAG, "Attempting to migrate WiFi credentials from NVS to LittleFS");
+  uint32_t hash = App.get_config_version_hash();
+
+  // Try loading the array format first
+  auto saved_stas_pref = global_preferences->make_preference<SavedWifiSettingsArray>(hash + 2, true);
+  SavedWifiSettingsArray saved_array{};
+  bool has_saved_array = saved_stas_pref.load(&saved_array);
+
+  if (!has_saved_array || saved_array.count == 0) {
+    // Try legacy single entry format
+    auto pref = global_preferences->make_preference<SavedWifiSettings>(hash, true);
+    SavedWifiSettings save{};
+    if (pref.load(&save) && save.ssid[0] != '\0') {
+      ESP_LOGI(TAG, "Found legacy single WiFi STA in NVS: %s", save.ssid);
+      saved_array.count = 1;
+      strncpy(saved_array.entries[0].ssid, save.ssid, sizeof(saved_array.entries[0].ssid) - 1);
+      strncpy(saved_array.entries[0].password, save.password, sizeof(saved_array.entries[0].password) - 1);
+    } else {
+      ESP_LOGD(TAG, "No WiFi credentials found in NVS to migrate");
+      return;
+    }
+  }
+
+  this->sanitize_saved_wifi_array_(saved_array);
+  this->rebuild_sta_from_saved_wifi_array_(saved_array);
+  this->save_creds_to_littlefs_();
+  ESP_LOGI(TAG, "Migrated %d WiFi STAs from NVS to LittleFS", saved_array.count);
 }
 
 #ifdef USE_WIFI_AP_EXCLUSIVE
@@ -1323,9 +1432,15 @@ void WiFiComponent::save_wifi_sta(const char *ssid, const char *password) {
   }
   const char *safe_password = password != nullptr ? password : "";
 
+  // Build array from current sta_ list
   SavedWifiSettingsArray array{};
-  this->saved_stas_pref_.load(&array);
-  this->sanitize_saved_wifi_array_(array);
+  array.count = 0;
+  for (size_t i = 0; i < this->sta_.size() && array.count < SavedWifiSettingsArray::MAX_SAVED; i++) {
+    strncpy(array.entries[array.count].ssid, this->sta_[i].get_ssid().c_str(), sizeof(array.entries[0].ssid) - 1);
+    strncpy(array.entries[array.count].password, this->sta_[i].get_password().c_str(),
+            sizeof(array.entries[0].password) - 1);
+    array.count++;
+  }
 
   int8_t existing_index = this->find_saved_wifi_index_(array, ssid);
   if (existing_index >= 0) {
@@ -1348,56 +1463,64 @@ void WiFiComponent::save_wifi_sta(const char *ssid, const char *password) {
     entry.password[sizeof(entry.password) - 1] = '\0';
   }
 
-  this->saved_stas_pref_.save(&array);
-  this->sync_legacy_saved_wifi_pref_(array);
+  this->sanitize_saved_wifi_array_(array);
   this->rebuild_sta_from_saved_wifi_array_(array, ssid);
+  this->save_creds_to_littlefs_();
   this->skip_cooldown_next_cycle_ = true;
-  global_preferences->sync();
 
-  // Trigger connection attempt (exits cooldown if needed, no-op if already connecting/connected)
   this->connect_soon_();
 }
 
 void WiFiComponent::clear_saved_wifi_stas() {
-  SavedWifiSettingsArray array{};
-  array.count = 0;
-  this->saved_stas_pref_.save(&array);
-  this->sync_legacy_saved_wifi_pref_(array);
-  global_preferences->sync();
   this->clear_sta();
+  // Write empty array to LittleFS
+  JsonDocument doc;
+  doc["statusCode"] = 200;
+  doc["error"] = nullptr;
+  doc["wifis"].to<JsonArray>();
+  std::ofstream ofs(WIFI_CREDS_FILE);
+  if (ofs.is_open()) {
+    serializeJson(doc, ofs);
+    ESP_LOGI(TAG, "Cleared saved WiFi STAs in LittleFS");
+  }
 }
 
 void WiFiComponent::delete_wifi_stas(const std::string &ssid) {
   this->delete_wifi_stas(ssid.c_str());
 }
 
-void WiFiComponent::delete_wifi_stas(const char *ssid) { 
+void WiFiComponent::delete_wifi_stas(const char *ssid) {
   if (ssid == nullptr || ssid[0] == '\0') {
     ESP_LOGW(TAG, "Skipping delete_wifi_stas for empty SSID");
     return;
   }
+
+  // Build array from current sta_ list
   SavedWifiSettingsArray array{};
-  this->saved_stas_pref_.load(&array);
-  this->sanitize_saved_wifi_array_(array);
+  array.count = 0;
+  for (size_t i = 0; i < this->sta_.size() && array.count < SavedWifiSettingsArray::MAX_SAVED; i++) {
+    strncpy(array.entries[array.count].ssid, this->sta_[i].get_ssid().c_str(), sizeof(array.entries[0].ssid) - 1);
+    strncpy(array.entries[array.count].password, this->sta_[i].get_password().c_str(),
+            sizeof(array.entries[0].password) - 1);
+    array.count++;
+  }
 
   bool modified = false;
   for (uint8_t i = 0; i < array.count; i++) {
     if (strcmp(array.entries[i].ssid, ssid) == 0) {
-      // Shift remaining entries down to overwrite the deleted one
       for (uint8_t j = i; j < array.count - 1; j++) {
         array.entries[j] = array.entries[j + 1];
       }
       array.count--;
       modified = true;
       ESP_LOGI(TAG, "Deleted WiFi STA " LOG_SECRET("'%s'"), ssid);
-      break;  // Assuming SSIDs are unique, we can stop after finding a match
+      break;
     }
   }
   if (modified) {
-    this->saved_stas_pref_.save(&array);
-    this->sync_legacy_saved_wifi_pref_(array);
+    this->sanitize_saved_wifi_array_(array);
     this->rebuild_sta_from_saved_wifi_array_(array);
-    global_preferences->sync();
+    this->save_creds_to_littlefs_();
     this->connect_soon_();
   }
 }
@@ -1407,17 +1530,23 @@ void WiFiComponent::append_wifi_sta(const std::string &ssid, const std::string &
 }
 
 void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
-  SavedWifiSettingsArray array{};
-  this->saved_stas_pref_.load(&array);
-  this->sanitize_saved_wifi_array_(array);
-
   if (ssid == nullptr || ssid[0] == '\0') {
     ESP_LOGW(TAG, "Cannot append WiFi STA with empty SSID");
     return;
   }
   const char *safe_password = password != nullptr ? password : "";
 
-  // 检查是否已达到最大保存数量
+  // Build array from current sta_ list
+  SavedWifiSettingsArray array{};
+  array.count = 0;
+  for (size_t i = 0; i < this->sta_.size() && array.count < SavedWifiSettingsArray::MAX_SAVED; i++) {
+    strncpy(array.entries[array.count].ssid, this->sta_[i].get_ssid().c_str(), sizeof(array.entries[0].ssid) - 1);
+    strncpy(array.entries[array.count].password, this->sta_[i].get_password().c_str(),
+            sizeof(array.entries[0].password) - 1);
+    array.count++;
+  }
+
+  // Check if already at max capacity
   if (array.count >= SavedWifiSettingsArray::MAX_SAVED) {
     int8_t existing_index = this->find_saved_wifi_index_(array, ssid);
     if (existing_index < 0) {
@@ -1427,39 +1556,30 @@ void WiFiComponent::append_wifi_sta(const char *ssid, const char *password) {
     }
   }
 
-  // 检查SSID是否已经存在，避免重复添加
+  // Check for duplicate SSID, update password if found
   for (uint8_t i = 0; i < array.count; i++) {
     if (strcmp(array.entries[i].ssid, ssid) == 0) {
       ESP_LOGD(TAG, "WiFi SSID '%s' already exists, updating password", ssid);
       strncpy(array.entries[i].password, safe_password, sizeof(array.entries[i].password) - 1);
       array.entries[i].password[sizeof(array.entries[i].password) - 1] = '\0';
 
-      // 保存更新后的数组
-      this->saved_stas_pref_.save(&array);
-      this->sync_legacy_saved_wifi_pref_(array);
-      global_preferences->sync();
-
       this->rebuild_sta_from_saved_wifi_array_(array, ssid);
+      this->save_creds_to_littlefs_();
       return;
     }
   }
 
-  // 添加新的WiFi条目
+  // Append new entry
   SavedWifiSettings &entry = array.entries[array.count];
   strncpy(entry.ssid, ssid, sizeof(entry.ssid) - 1);
-  entry.ssid[sizeof(entry.ssid) - 1] = '\0';  // 确保null终止
+  entry.ssid[sizeof(entry.ssid) - 1] = '\0';
   strncpy(entry.password, safe_password, sizeof(entry.password) - 1);
-  entry.password[sizeof(entry.password) - 1] = '\0';  // 确保null终止
+  entry.password[sizeof(entry.password) - 1] = '\0';
   array.count++;
-  
-  // 保存到flash
-  if (!this->saved_stas_pref_.save(&array)) {
-    ESP_LOGE(TAG, "Failed to save WiFi STA to flash");
-    return;
-  }
 
-  this->sync_legacy_saved_wifi_pref_(array);
+  this->sanitize_saved_wifi_array_(array);
   this->rebuild_sta_from_saved_wifi_array_(array, ssid);
+  this->save_creds_to_littlefs_();
 
   ESP_LOGI(TAG, "WiFi STA '%s' appended successfully (total: %d/%d)", ssid, array.count,
            SavedWifiSettingsArray::MAX_SAVED);
@@ -1480,6 +1600,20 @@ void WiFiComponent::connect_soon_() {
 
   if (!this->has_sta() || this->state_ == WIFI_COMPONENT_STATE_DISABLED) {
     return;
+  }
+
+  // Already connected to the network we are supposed to connect to — do not
+  // bounce the radio. (The caller updates the selection first when it wants to
+  // switch to a different saved network.)
+  if (this->connected_) {
+    char ssid_buf[SSID_BUFFER_SIZE];
+    std::string current_ssid = wifi_ssid_to(ssid_buf);
+    const WiFiAP *selected = this->get_selected_sta_();
+    if (selected != nullptr && !current_ssid.empty() && current_ssid == selected->get_ssid()) {
+      ESP_LOGD(TAG, "Already connected to " LOG_SECRET("'%s'") ", skipping reconnect",
+               current_ssid.c_str());
+      return;
+    }
   }
 
   ESP_LOGD(TAG, "Starting immediate WiFi reconnect due to new WiFi credentials");
@@ -2709,40 +2843,51 @@ bool WiFiComponent::release_high_performance() {
 bool WiFiComponent::load_fast_connect_settings_(WiFiAP &params) {
   SavedWifiFastConnectSettings fast_connect_save{};
 
-  if (this->fast_connect_pref_.load(&fast_connect_save)) {
-    // Validate saved AP index
-    if (fast_connect_save.ap_index < 0 || static_cast<size_t>(fast_connect_save.ap_index) >= this->sta_.size()) {
-      ESP_LOGW(TAG, "AP index out of bounds");
+  // Try loading from LittleFS
+  std::ifstream ifs(WIFI_FAST_CONNECT_FILE);
+  if (ifs.is_open()) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, ifs);
+    if (!err && doc.containsKey("bssid")) {
+      JsonArray bssid_arr = doc["bssid"];
+      for (uint8_t i = 0; i < 6 && i < bssid_arr.size(); i++) {
+        fast_connect_save.bssid[i] = bssid_arr[i];
+      }
+      fast_connect_save.channel = doc["channel"] | 0;
+      fast_connect_save.ap_index = doc["ap_index"] | -1;
+    } else {
       return false;
     }
-
-    // Set selected index for future operations (save, retry, etc)
-    this->selected_sta_index_ = fast_connect_save.ap_index;
-
-    // Copy entire config, then override with fast connect data
-    params = this->sta_[fast_connect_save.ap_index];
-
-    // Override with saved BSSID/channel from fast connect (SSID/password/etc already copied from config)
-    bssid_t bssid{};
-    std::copy(fast_connect_save.bssid, fast_connect_save.bssid + 6, bssid.begin());
-    params.set_bssid(bssid);
-    params.set_channel(fast_connect_save.channel);
-    // Fast connect uses specific BSSID+channel, not hidden network probe (even if config has hidden: true)
-    params.set_hidden(false);
-
-    ESP_LOGD(TAG, "Loaded fast_connect settings");
-#if defined(USE_ESP32) && defined(SOC_WIFI_SUPPORT_5G)
-    if ((this->band_mode_ == WIFI_BAND_MODE_5G_ONLY && fast_connect_save.channel < FIRST_5GHZ_CHANNEL) ||
-        (this->band_mode_ == WIFI_BAND_MODE_2G_ONLY && fast_connect_save.channel >= FIRST_5GHZ_CHANNEL)) {
-      ESP_LOGW(TAG, "Saved channel %u not allowed by band mode, ignoring fast_connect", fast_connect_save.channel);
-      this->selected_sta_index_ = -1;
-      return false;
-    }
-#endif
-    return true;
+  } else {
+    return false;
   }
 
-  return false;
+  // Validate saved AP index
+  if (fast_connect_save.ap_index < 0 || static_cast<size_t>(fast_connect_save.ap_index) >= this->sta_.size()) {
+    ESP_LOGW(TAG, "AP index out of bounds");
+    return false;
+  }
+
+  this->selected_sta_index_ = fast_connect_save.ap_index;
+  params = this->sta_[fast_connect_save.ap_index];
+
+  bssid_t bssid{};
+  std::copy(fast_connect_save.bssid, fast_connect_save.bssid + 6, bssid.begin());
+  params.set_bssid(bssid);
+  params.set_channel(fast_connect_save.channel);
+  // Fast connect uses specific BSSID+channel, not hidden network probe (even if config has hidden: true)
+  params.set_hidden(false);
+
+  ESP_LOGD(TAG, "Loaded fast_connect settings from LittleFS");
+#if defined(USE_ESP32) && defined(SOC_WIFI_SUPPORT_5G)
+  if ((this->band_mode_ == WIFI_BAND_MODE_5G_ONLY && fast_connect_save.channel < FIRST_5GHZ_CHANNEL) ||
+      (this->band_mode_ == WIFI_BAND_MODE_2G_ONLY && fast_connect_save.channel >= FIRST_5GHZ_CHANNEL)) {
+    ESP_LOGW(TAG, "Saved channel %u not allowed by band mode, ignoring fast_connect", fast_connect_save.channel);
+    this->selected_sta_index_ = -1;
+    return false;
+  }
+#endif
+  return true;
 }
 
 void WiFiComponent::save_fast_connect_settings_(const bssid_t &bssid, uint8_t channel) {
@@ -2750,21 +2895,42 @@ void WiFiComponent::save_fast_connect_settings_(const bssid_t &bssid, uint8_t ch
   // Fallback to 0 is defensive programming for robustness
   int8_t ap_index = this->selected_sta_index_ >= 0 ? this->selected_sta_index_ : 0;
 
-  // Skip save if settings haven't changed (compare with previously saved settings to reduce flash wear)
+  // Load previous to compare (skip save if unchanged, to reduce flash wear)
   SavedWifiFastConnectSettings previous_save{};
-  if (this->fast_connect_pref_.load(&previous_save) && memcmp(previous_save.bssid, bssid.data(), 6) == 0 &&
-      previous_save.channel == channel && previous_save.ap_index == ap_index) {
-    return;  // No change, nothing to save
+  std::ifstream ifs(WIFI_FAST_CONNECT_FILE);
+  bool has_previous = false;
+  if (ifs.is_open()) {
+    JsonDocument doc;
+    if (!deserializeJson(doc, ifs) && doc.containsKey("bssid")) {
+      JsonArray bssid_arr = doc["bssid"];
+      for (uint8_t i = 0; i < 6 && i < bssid_arr.size(); i++) {
+        previous_save.bssid[i] = bssid_arr[i];
+      }
+      previous_save.channel = doc["channel"] | 0;
+      previous_save.ap_index = doc["ap_index"] | -1;
+      has_previous = true;
+    }
   }
 
-  SavedWifiFastConnectSettings fast_connect_save{};
-  memcpy(fast_connect_save.bssid, bssid.data(), 6);
-  fast_connect_save.channel = channel;
-  fast_connect_save.ap_index = ap_index;
+  if (has_previous && memcmp(previous_save.bssid, bssid.data(), 6) == 0 &&
+      previous_save.channel == channel && previous_save.ap_index == ap_index) {
+    return;  // No change
+  }
 
-  this->fast_connect_pref_.save(&fast_connect_save);
+  // Write to LittleFS
+  JsonDocument doc;
+  doc["channel"] = channel;
+  doc["ap_index"] = ap_index;
+  JsonArray bssid_arr = doc["bssid"].to<JsonArray>();
+  for (uint8_t i = 0; i < 6; i++) {
+    bssid_arr.add(bssid[i]);
+  }
 
-  ESP_LOGD(TAG, "Saved fast_connect settings");
+  std::ofstream ofs(WIFI_FAST_CONNECT_FILE);
+  if (ofs.is_open()) {
+    serializeJson(doc, ofs);
+    ESP_LOGD(TAG, "Saved fast_connect settings to LittleFS");
+  }
 }
 #endif
 
