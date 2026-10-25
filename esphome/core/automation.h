@@ -558,7 +558,7 @@ template<typename... Ts> class Action {
     this->play(x...);
     this->play_next_(x...);
   }
-  void stop_complex() {
+  virtual void stop_complex() {
     if (num_running_) {
       this->stop();
       this->num_running_ = 0;
@@ -566,7 +566,9 @@ template<typename... Ts> class Action {
     this->stop_next_();
   }
   /// Check if this or any of the following actions are currently running.
-  bool is_running() { return this->num_running_ > 0 || this->is_running_next_(); }
+  /// Virtual: long-running actions (e.g. async http_request) override these to
+  /// keep chain dispatch (next_->stop_complex()/is_running()) correct.
+  virtual bool is_running() { return this->num_running_ > 0 || this->is_running_next_(); }
 
   /// The total number of actions that are currently running in this plus any of
   /// the following actions in the chain.
