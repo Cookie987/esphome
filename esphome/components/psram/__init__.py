@@ -250,10 +250,6 @@ async def to_code(config: ConfigType) -> None:
         if variant not in (VARIANT_ESP32, VARIANT_ESP32S2):
             add_idf_sdkconfig_option("CONFIG_ESPTOOLPY_FLASHFREQ_120M", True)
         if config[CONF_MODE] == TYPE_OCTAL and idf_version() >= cv.Version(5, 4, 0):
-            add_idf_sdkconfig_option(
-                "CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR",
-                True,
-            )
     if config[CONF_ENABLE_ECC]:
         add_idf_sdkconfig_option("CONFIG_SPIRAM_ECC_ENABLE", True)
 
